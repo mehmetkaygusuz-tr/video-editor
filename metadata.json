@@ -1,0 +1,6 @@
+{
+  "name": "WebCut AI Studio",
+  "description": "2026 standartlarında WebCodecs, WebGPU ve WebAssembly ile çalışan istemci odaklı hibrit yapay zeka video editörü.",
+  "requestFramePermissions": ["camera", "microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

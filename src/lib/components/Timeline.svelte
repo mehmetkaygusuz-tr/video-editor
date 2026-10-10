@@ -1,0 +1,1388 @@
+<script lang="ts">
+  import { onMount, onDestroy, untrack } from 'svelte';
+  import { editor } from '../editor.svelte';
+  import { aiService } from '../engine/aiService.svelte';
+  import { masterAudioClock } from '../engine/audioClock';
+  import Waveform from './Waveform.svelte';
+  import TimelineStage from './TimelineStage.svelte';
+  import type { TimelineClip, SeekOptions } from '../types';
+  import { quantizeToFrame } from '../engine/timeline/timecode';
+  import { 
+    ZoomIn, ZoomOut, Sparkles, Volume2, VolumeX, Lock, LockOpen as Unlock,
+    Magnet, Music, Scissors, Trash2, Plus, Shuffle, Gauge, Sliders
+  } from '@lucide/svelte';
+  
+  const TRACK_HEIGHT = 56;
+  const RULER_HEIGHT = 28;
+
+  let container: HTMLDivElement | undefined = $state();
+  let isDraggingPlayhead = false;
+  let isPanning = false;
+  let lastPanX = 0;
+  let lastPanY = 0;
+  
+  let activePointers = new Map<number, PointerEvent>();
+  let initialPinchDistance = 0;
+  let initialZoom = 100;
+  let initialPinchCentroidTime = 0;
+  let activeSnapGuide = $state<{ time: number; type: 'edge' | 'beat' } | null>(null);
+
+  const containerWidth = $derived(container?.clientWidth || 1920);
+  const isMobileMode = $derived(containerWidth < 768);
+  const effectiveHeaderWidth = $derived(isMobileMode ? 44 : 96);
+  const viewportStart = $derived(editor.scrollX / editor.zoom);
+  const viewportEnd = $derived((editor.scrollX + containerWidth) / editor.zoom);
+
+  // Dynamically calculate the timeline duration based on clips + buffer (CapCut & Premiere style)
+  const maxClipEndTime = $derived.by(() => {
+    let max = 0;
+    for (const track of editor.tracks) {
+      for (const clip of track.clips) {
+        const end = clip.startAt + clip.duration;
+        if (end > max) max = end;
+      }
+    }
+    return max;
+  });
+
+  const dynamicTimelineDuration = $derived.by(() => {
+    // If empty timeline, 10 seconds default; if has content, content + 4s buffer; extends if playhead moves further
+    const minBuffer = maxClipEndTime > 0 ? maxClipEndTime + 4 : 10;
+    return Math.max(minBuffer, editor.playhead + 2);
+  });
+
+  $effect(() => {
+    const nextDur = Number(dynamicTimelineDuration.toFixed(2));
+    if (editor.duration !== nextDur) {
+      untrack(() => {
+        editor.duration = nextDur;
+      });
+    }
+  });
+
+  // Clamp vertical scroll so timeline never scrolls down into empty space
+  const maxScrollY = $derived.by(() => {
+    const totalTracksHeight = editor.tracks.length * 56;
+    const availableHeight = Math.max(80, (container?.clientHeight || 240) - 28);
+    return Math.max(0, totalTracksHeight - availableHeight);
+  });
+
+  $effect(() => {
+    if (editor.scrollY > maxScrollY) {
+      untrack(() => {
+        editor.scrollY = maxScrollY;
+      });
+    }
+  });
+
+  // Adaptive NLE Ruler calculations (Prevents overlapping labels at any zoom level)
+  const rulerTicks = $derived.by(() => {
+    const minPixelSpacing = 75;
+    const standardIntervals = [0.1, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
+    
+    // Find smallest interval where major tick labels don't collide
+    const interval = standardIntervals.find(sec => sec * editor.zoom >= minPixelSpacing) || 60;
+    
+    let subInterval = interval / 5;
+    if (interval <= 0.5) subInterval = interval / 2;
+    else if (interval === 1) subInterval = 0.25;
+    else if (interval === 2) subInterval = 0.5;
+    else if (interval === 5) subInterval = 1;
+    else if (interval === 10) subInterval = 2;
+    else if (interval === 15) subInterval = 5;
+    else if (interval === 30) subInterval = 5;
+    else if (interval === 60) subInterval = 10;
+
+    const totalDuration = dynamicTimelineDuration;
+    const minorCount = Math.ceil(totalDuration / subInterval);
+    const ticks: { time: number; label: string; left: number; isMajor: boolean }[] = [];
+    
+    for (let j = 0; j <= minorCount; j++) {
+      const t = j * subInterval;
+      if (t > totalDuration) break;
+      const isMajor = Math.abs(t % interval) < 0.001 || Math.abs((t % interval) - interval) < 0.001;
+      
+      let label = '';
+      if (isMajor) {
+        if (interval < 1) {
+          label = `${t.toFixed(1)}s`;
+        } else {
+          const m = Math.floor(t / 60);
+          const s = Math.floor(t % 60);
+          if (m > 0) {
+            label = `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}`;
+          } else {
+            label = `00:${String(s).padStart(2, '0')}`;
+          }
+        }
+      }
+
+      ticks.push({
+        time: t,
+        label,
+        left: t * editor.zoom,
+        isMajor
+      });
+    }
+
+    return ticks;
+  });
+
+  let activeClipDrag: {
+    clipId: string;
+    mode: 'move' | 'trim-left' | 'trim-right';
+    startX: number;
+    initialStartAt: number;
+    initialDuration: number;
+    initialSourceOffset: number;
+  } | null = null;
+  
+  let radialMenuContext = $state<{ clipId: string, x: number, y: number } | null>(null);
+
+  function handleClipContextMenu(e: MouseEvent, clip: TimelineClip) {
+    e.preventDefault();
+    e.stopPropagation();
+    editor.selectClip(clip.id);
+    editor.triggerHaptic('medium');
+    radialMenuContext = { clipId: clip.id, x: e.clientX, y: e.clientY };
+  }
+  
+  // Need reference to trigger decode when a video clip is dropped or clicked
+  import { getFileFromOPFS } from '../opfs';
+  
+  import { engine } from '../engine/orchestrator.svelte';
+
+  let timelineFileCache = new Map<string, File>();
+
+  async function triggerPreview(assetId: string) {
+    const asset = editor.assets.find(a => a.id === assetId);
+    if (!asset || asset.type !== 'video') return;
+    try {
+      let file: File | null | undefined = timelineFileCache.get(asset.name);
+      if (!file) {
+         file = await getFileFromOPFS(asset.name);
+         if (file) timelineFileCache.set(asset.name, file);
+      }
+      if (file) {
+        engine.processVideoTask(file);
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  let lastClipTapId = '';
+  let lastClipTapTime = 0;
+
+  function handleClipPointerDown(e: PointerEvent, clip: TimelineClip, mode: 'move' | 'trim-left' | 'trim-right') {
+    e.stopPropagation(); // Prevent panning
+    editor.selectClip(clip.id);
+    
+    // Double tap detection on clip to quick-open bottom sheet inspector
+    const now = performance.now();
+    if (lastClipTapId === clip.id && (now - lastClipTapTime) < 300) {
+      editor.openBottomSheet('inspector');
+      editor.triggerHaptic('medium');
+      lastClipTapId = '';
+      lastClipTapTime = 0;
+    } else {
+      lastClipTapId = clip.id;
+      lastClipTapTime = now;
+    }
+
+    if (container) {
+       container.setPointerCapture(e.pointerId);
+       activePointers.set(e.pointerId, e); // Register as active pointer to route moves
+    }
+    
+    // Trigger subtle mobile haptic feedback if supported
+    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+      try {
+        navigator.vibrate(10);
+      } catch (_) {}
+    }
+
+    activeClipDrag = {
+      clipId: clip.id,
+      mode,
+      startX: e.clientX,
+      initialStartAt: clip.startAt,
+      initialDuration: clip.duration,
+      initialSourceOffset: clip.sourceOffset
+    };
+
+    // Auto-preview the clip frame when clicked/dragged
+    if (clip.assetId) {
+      const timeInClip = Math.max(0, editor.playhead - clip.startAt);
+      const sourceTime = (clip.sourceOffset || 0) + timeInClip;
+      triggerSeek(clip.assetId, sourceTime);
+    }
+  }
+
+  function getPinchDistance() {
+    const pointers = Array.from(activePointers.values());
+    if (pointers.length < 2) return 0;
+    const dx = pointers[0].clientX - pointers[1].clientX;
+    const dy = pointers[0].clientY - pointers[1].clientY;
+    return Math.hypot(dx, dy);
+  }
+
+  function getPinchCentroidX() {
+    const pointers = Array.from(activePointers.values());
+    if (pointers.length < 2) return 0;
+    return (pointers[0].clientX + pointers[1].clientX) / 2;
+  }
+
+  function setTimelineZoom(targetZoom: number) {
+    const newZoom = Math.max(2, Math.min(300, targetZoom));
+    editor.zoom = newZoom;
+    // Sol 0 sabit kalsın: kullanıcı büyütüp küçülttükçe sola/sağa kayıp gitmez, sol 00:00 başlangıcı daima sabit kalır.
+    editor.scrollX = 0;
+  }
+
+  function handleWheel(e: WheelEvent) {
+    if (e.ctrlKey || e.metaKey) {
+      // Zoom anchored to left 0
+      e.preventDefault();
+      const zoomFactor = Math.exp(-e.deltaY * 0.005);
+      setTimelineZoom(editor.zoom * zoomFactor);
+    } else {
+      // Pan with strict boundary clamping
+      const maxScrollX = Math.max(0, (dynamicTimelineDuration * editor.zoom) - (containerWidth - effectiveHeaderWidth));
+      editor.scrollX = Math.max(0, Math.min(maxScrollX, editor.scrollX + e.deltaX));
+      editor.scrollY = Math.max(0, Math.min(maxScrollY, editor.scrollY + e.deltaY));
+    }
+  }
+
+  // Scrubbing seek reaction for playhead updates when paused
+  let lastManualPlayhead = -1;
+  $effect(() => {
+    const currentHead = editor.playhead;
+    if (!editor.isPlaying && Math.abs(currentHead - lastManualPlayhead) > 0.001) {
+      lastManualPlayhead = currentHead;
+      for (const track of editor.tracks) {
+        for (const clip of track.clips) {
+          if (currentHead >= clip.startAt && currentHead <= clip.startAt + clip.duration) {
+            if (clip.assetId) {
+              const speedMultiplier = clip.speed ?? 1.0;
+              const timeInClip = currentHead - clip.startAt;
+              const sourceTime = (clip.sourceOffset || 0) + (timeInClip * speedMultiplier);
+              triggerSeek(clip.assetId, sourceTime);
+            }
+            return;
+          }
+        }
+      }
+    }
+  });
+
+  function handleGlobalKeyDown(e: KeyboardEvent) {
+    const target = e.target as HTMLElement | null;
+    if (target && target.closest('input, textarea, [contenteditable="true"]')) {
+      return;
+    }
+    const isCtrlOrMeta = e.ctrlKey || e.metaKey;
+
+    if (isCtrlOrMeta && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
+      e.preventDefault();
+      editor.undo();
+    } else if (isCtrlOrMeta && (e.key === 'y' || e.key === 'Y' || (e.shiftKey && (e.key === 'z' || e.key === 'Z')))) {
+      e.preventDefault();
+      editor.redo();
+    } else if (e.key === 's' || e.key === 'S') {
+      e.preventDefault();
+      editor.splitClipAtPlayhead();
+    } else if (e.key === 'Delete' || e.key === 'Backspace') {
+      if (editor.selectedClipId) {
+        e.preventDefault();
+        editor.deleteClip();
+      }
+    } else if (e.key === 'm' || e.key === 'M') {
+      e.preventDefault();
+      editor.isMagnetic = !editor.isMagnetic;
+      editor.announce(editor.isMagnetic ? 'Manyetik mod açık' : 'Manyetik mod kapalı');
+    }
+  }
+
+  onMount(() => {
+    if (container) {
+       container.addEventListener('wheel', handleWheel, { passive: false });
+    }
+    window.addEventListener('keydown', handleGlobalKeyDown);
+  });
+
+  onDestroy(() => {
+    if (container) {
+       container.removeEventListener('wheel', handleWheel);
+    }
+    window.removeEventListener('keydown', handleGlobalKeyDown);
+  });
+
+  function handlePointerDown(e: PointerEvent) {
+    if (!container) return;
+
+    if (radialMenuContext && !(e.target as HTMLElement).closest('.radial-menu-container')) {
+       radialMenuContext = null;
+    }
+
+    const target = e.target as HTMLElement | null;
+    // Butonlara, araç çubuklarına veya kontrollere basıldığında oynatma çizgisinin (kırmızı çizgi) oraya sıçramasını engelle
+    if (target && target.closest('button, input, [data-no-scrub], .floating-controls')) {
+      return;
+    }
+    container.setPointerCapture(e.pointerId);
+    activePointers.set(e.pointerId, e);
+
+    if (activePointers.size === 1) {
+      const rect = container.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      // Touch pan
+      if (e.pointerType === 'touch' && (y >= RULER_HEIGHT || x <= effectiveHeaderWidth)) {
+          // Touch pan
+          isPanning = true;
+          isDraggingPlayhead = false;
+          lastPanX = e.clientX;
+          lastPanY = e.clientY;
+      } else if (e.button === 1 || (e.button === 0 && e.altKey)) {
+          // Mouse pan (middle click or alt+click)
+          isPanning = true;
+          isDraggingPlayhead = false;
+          lastPanX = e.clientX;
+          lastPanY = e.clientY;
+      } else if (e.button === 0 && x > effectiveHeaderWidth) {
+          // Scrub playhead anywhere on timeline background
+          isDraggingPlayhead = true;
+          editor.isScrubbing = true;
+          isPanning = false;
+          updatePlayhead(e.clientX);
+          scheduleSettleSeek();
+      }
+    } else if (activePointers.size === 2) {
+      // Pinch to zoom started
+      isPanning = false;
+      isDraggingPlayhead = false;
+      editor.isScrubbing = false;
+      initialPinchDistance = getPinchDistance();
+      initialZoom = editor.zoom;
+      
+      const centroidX = getPinchCentroidX();
+      const rect = container?.getBoundingClientRect();
+      if (!rect) return;
+      const mouseX = centroidX - rect.left - effectiveHeaderWidth;
+      initialPinchCentroidTime = (mouseX + editor.scrollX) / editor.zoom;
+    }
+  }
+
+  let settleSeekTimer: any;
+  function scheduleSettleSeek() {
+    clearTimeout(settleSeekTimer);
+    settleSeekTimer = setTimeout(() => {
+      if (!editor.isPlaying) {
+        seekCurrentPlayheadExact();
+      }
+    }, 80);
+  }
+
+  function seekCurrentPlayheadExact() {
+    const currentHead = editor.playhead;
+    for (const track of editor.tracks) {
+      for (const clip of track.clips) {
+        if (currentHead >= clip.startAt && currentHead <= clip.startAt + clip.duration) {
+          if (clip.assetId) {
+            const speedMultiplier = clip.speed ?? 1.0;
+            const timeInClip = currentHead - clip.startAt;
+            const sourceTime = (clip.sourceOffset || 0) + (timeInClip * speedMultiplier);
+            triggerSeek(clip.assetId, sourceTime, { mode: 'exact' });
+          }
+          return;
+        }
+      }
+    }
+  }
+
+  async function triggerSeek(assetId: string, timeInSeconds: number, options?: SeekOptions) {
+    const asset = editor.assets.find(a => a.id === assetId);
+    if (!asset || asset.type !== 'video') return;
+    try {
+      let file: File | null | undefined = timelineFileCache.get(asset.name);
+      if (!file) {
+         file = await getFileFromOPFS(asset.name);
+         if (file) timelineFileCache.set(asset.name, file);
+      }
+      if (!file && asset.blobUrl) {
+        try {
+          const res = await fetch(asset.blobUrl);
+          const blob = await res.blob();
+          file = new File([blob], asset.name, { type: 'video/mp4' });
+          timelineFileCache.set(asset.name, file);
+        } catch (_) {}
+      }
+      if (file) {
+        const seekMode = options?.mode || (editor.isScrubbing && editor.scrubbingMode === 'adaptive' ? 'fast_keyframe' : editor.scrubbingMode);
+        await engine.seekFrame(file, timeInSeconds, undefined, { mode: seekMode });
+        window.dispatchEvent(new CustomEvent('editor:seek', { 
+            detail: { file, time: timeInSeconds } 
+        }));
+      }
+    } catch (e) {
+      console.error(e);
+    }
+  }
+
+  function handlePointerMove(e: PointerEvent) {
+    if (!activePointers.has(e.pointerId)) return;
+    activePointers.set(e.pointerId, e);
+    
+    const events = e.getCoalescedEvents ? e.getCoalescedEvents() : [e];
+    const lastEvent = events[events.length - 1];
+
+    if (activeClipDrag) {
+      const dx = lastEvent.clientX - activeClipDrag.startX;
+      let timeDelta = dx / editor.zoom;
+      
+      let seekAssetId: string | undefined;
+      let seekTime: number = -1;
+
+      // Find boundaries to prevent overlapping
+      const clipTrack = editor.tracks.find(t => t.clips.some(c => c.id === activeClipDrag!.clipId));
+      let minStart = 0;
+      let maxEnd = Infinity;
+      if (clipTrack) {
+         const otherClips = clipTrack.clips.filter(c => c.id !== activeClipDrag!.clipId);
+         for (const other of otherClips) {
+            const otherEnd = other.startAt + other.duration;
+            if (otherEnd <= activeClipDrag.initialStartAt && otherEnd > minStart) {
+               minStart = otherEnd;
+            }
+            if (other.startAt >= (activeClipDrag.initialStartAt + activeClipDrag.initialDuration) && other.startAt < maxEnd) {
+               maxEnd = other.startAt;
+            }
+         }
+      }
+
+      // Collect Snap Points
+      const snapThreshold = 10 / editor.zoom;
+      let snapPoints: {time: number, type: 'edge' | 'beat'}[] = [];
+      snapPoints.push({time: editor.playhead, type: 'edge'});
+      
+      if (editor.isMagnetic) {
+         editor.tracks.forEach(t => t.clips.forEach(c => {
+             if (c.id !== activeClipDrag!.clipId) {
+                 snapPoints.push({time: c.startAt, type: 'edge'});
+                 snapPoints.push({time: c.startAt + c.duration, type: 'edge'});
+             }
+         }));
+      }
+      if (editor.snapToBeat) {
+         editor.beatMarkers.forEach(b => snapPoints.push({time: b.time, type: 'beat'}));
+      }
+
+      activeSnapGuide = null; // reset by default
+
+      if (activeClipDrag.mode === 'move') {
+         let newStart = activeClipDrag.initialStartAt + timeDelta;
+         
+         // Snapping
+         let bestSnapStart = newStart;
+         let minSnapDist = snapThreshold;
+         let activeGuide = null;
+
+         for (const p of snapPoints) {
+             const distStart = Math.abs(newStart - p.time);
+             if (distStart < minSnapDist) {
+                 minSnapDist = distStart;
+                 bestSnapStart = p.time;
+                 activeGuide = { time: p.time, type: p.type };
+             }
+             const distEnd = Math.abs((newStart + activeClipDrag.initialDuration) - p.time);
+             if (distEnd < minSnapDist) {
+                 minSnapDist = distEnd;
+                 bestSnapStart = p.time - activeClipDrag.initialDuration;
+                 activeGuide = { time: p.time, type: p.type };
+             }
+         }
+         if (activeGuide) activeSnapGuide = activeGuide;
+         newStart = bestSnapStart;
+
+         // Clamp start so it doesn't overlap
+         newStart = Math.max(minStart, Math.min(newStart, maxEnd - activeClipDrag.initialDuration));
+         
+         editor.updateClipBounds(
+             activeClipDrag.clipId, 
+             newStart, 
+             activeClipDrag.initialDuration, 
+             activeClipDrag.initialSourceOffset, 
+             false
+         );
+      } else if (activeClipDrag.mode === 'trim-left') {
+         const maxDelta = activeClipDrag.initialDuration - 0.1;
+         let clampedDelta = Math.min(timeDelta, maxDelta);
+         const availableOffset = activeClipDrag.initialSourceOffset;
+         let finalDelta = Math.max(-availableOffset, clampedDelta);
+         
+         let newStartTentative = activeClipDrag.initialStartAt + finalDelta;
+         
+         // Snapping
+         let bestSnapStart = newStartTentative;
+         let minSnapDist = snapThreshold;
+         let activeGuide = null;
+         for (const p of snapPoints) {
+             const dist = Math.abs(newStartTentative - p.time);
+             if (dist < minSnapDist) {
+                 minSnapDist = dist;
+                 bestSnapStart = p.time;
+                 activeGuide = { time: p.time, type: p.type };
+             }
+         }
+         if (activeGuide) activeSnapGuide = activeGuide;
+         newStartTentative = bestSnapStart;
+         finalDelta = newStartTentative - activeClipDrag.initialStartAt;
+
+         // Collision clamp
+         if (activeClipDrag.initialStartAt + finalDelta < minStart) {
+             finalDelta = minStart - activeClipDrag.initialStartAt;
+         }
+         
+         const newSourceOffset = activeClipDrag.initialSourceOffset + finalDelta;
+         editor.updateClipBounds(
+             activeClipDrag.clipId,
+             activeClipDrag.initialStartAt + finalDelta,
+             activeClipDrag.initialDuration - finalDelta,
+             newSourceOffset,
+             false
+         );
+         
+         const clip = editor.tracks.flatMap(t => t.clips).find(c => c.id === activeClipDrag!.clipId);
+         if (clip && clip.assetId) {
+            seekAssetId = clip.assetId;
+            seekTime = newSourceOffset;
+         }
+      } else if (activeClipDrag.mode === 'trim-right') {
+         const minDuration = 0.1;
+         let finalDelta = Math.max(minDuration - activeClipDrag.initialDuration, timeDelta);
+         let newDuration = activeClipDrag.initialDuration + finalDelta;
+         
+         let newEndTentative = activeClipDrag.initialStartAt + newDuration;
+
+         // Snapping
+         let bestSnapEnd = newEndTentative;
+         let minSnapDist = snapThreshold;
+         let activeGuide = null;
+         for (const p of snapPoints) {
+             const dist = Math.abs(newEndTentative - p.time);
+             if (dist < minSnapDist) {
+                 minSnapDist = dist;
+                 bestSnapEnd = p.time;
+                 activeGuide = { time: p.time, type: p.type };
+             }
+         }
+         if (activeGuide) activeSnapGuide = activeGuide;
+         newDuration = bestSnapEnd - activeClipDrag.initialStartAt;
+
+         // Collision clamp
+         if (activeClipDrag.initialStartAt + newDuration > maxEnd) {
+             newDuration = maxEnd - activeClipDrag.initialStartAt;
+         }
+
+         const clipToTrim = editor.tracks.flatMap(t => t.clips).find(c => c.id === activeClipDrag!.clipId);
+         if (clipToTrim && clipToTrim.assetId) {
+            const asset = editor.assets.find(a => a.id === clipToTrim.assetId);
+            if (asset && asset.duration && asset.duration > 0) {
+               const maxAllowed = Math.max(0.1, asset.duration - activeClipDrag.initialSourceOffset);
+               if (newDuration > maxAllowed) {
+                  newDuration = maxAllowed;
+               }
+            }
+         }
+         
+         editor.updateClipBounds(
+             activeClipDrag.clipId,
+             activeClipDrag.initialStartAt,
+             newDuration,
+             activeClipDrag.initialSourceOffset,
+             false
+         );
+         
+         const clip = editor.tracks.flatMap(t => t.clips).find(c => c.id === activeClipDrag!.clipId);
+         if (clip && clip.assetId) {
+            seekAssetId = clip.assetId;
+            seekTime = clip.sourceOffset + newDuration;
+         }
+      }
+      
+      if (seekAssetId && seekTime >= 0) {
+         triggerSeek(seekAssetId, seekTime);
+      }
+      return; // Skip normal panning
+    }
+
+    if (activePointers.size === 1) {
+      if (isDraggingPlayhead) {
+        updatePlayhead(lastEvent.clientX);
+      } else if (isPanning) {
+        const dx = lastEvent.clientX - lastPanX;
+        const dy = lastEvent.clientY - lastPanY;
+        editor.scrollX = Math.max(0, editor.scrollX - dx);
+        editor.scrollY = Math.max(0, editor.scrollY - dy);
+        
+        const containerWidth = container?.clientWidth || 1920;
+        if (containerWidth < 768) {
+           editor.playhead = (editor.scrollX + (containerWidth / 2)) / editor.zoom;
+        }
+        
+        lastPanX = lastEvent.clientX;
+        lastPanY = lastEvent.clientY;
+      }
+    } else if (activePointers.size === 2) {
+      const currentDistance = getPinchDistance();
+      if (initialPinchDistance > 0) {
+        const scale = currentDistance / initialPinchDistance;
+        editor.zoom = Math.max(2, Math.min(500, initialZoom * scale));
+        
+        const centroidX = getPinchCentroidX();
+        const rect = container?.getBoundingClientRect();
+        if (!rect) return;
+        const mouseX = centroidX - rect.left - effectiveHeaderWidth;
+        
+        if (mouseX >= 0) {
+           editor.scrollX = Math.max(0, (initialPinchCentroidTime * editor.zoom) - mouseX);
+        }
+      }
+    }
+  }
+
+  function handlePointerUp(e: PointerEvent) {
+    activePointers.delete(e.pointerId);
+    if (container && container.hasPointerCapture(e.pointerId)) {
+      try { container.releasePointerCapture(e.pointerId); } catch(err) {}
+    }
+    
+    if (activeClipDrag) {
+      editor.saveState();
+      activeClipDrag = null;
+      activeSnapGuide = null;
+    }
+
+    if (activePointers.size === 0) {
+      if (isDraggingPlayhead) {
+        editor.isScrubbing = false;
+        masterAudioClock.seek(editor.playhead, editor.tracks);
+        seekCurrentPlayheadExact();
+      }
+      isDraggingPlayhead = false;
+      isPanning = false;
+      activeSnapGuide = null;
+    } else if (activePointers.size === 1) {
+      // Reset panning origin for remaining pointer
+      const remaining = Array.from(activePointers.values())[0];
+      lastPanX = remaining.clientX;
+      lastPanY = remaining.clientY;
+    }
+  }
+
+  let lastSnapTime = -1;
+
+  function updatePlayhead(clientX: number) {
+    const rect = container?.getBoundingClientRect();
+    if (!rect) return;
+    const mouseX = clientX - rect.left - effectiveHeaderWidth;
+    let newTime = Math.max(0, (mouseX + editor.scrollX) / editor.zoom);
+    
+    // Magnetic Snapping Logic
+    const snapThreshold = 12 / editor.zoom; // 12 pixels snapping threshold
+    let snapped = false;
+
+    // Check clip edge snaps
+    let snapType: 'edge' | 'beat' = 'edge';
+    if (editor.isMagnetic) {
+      for (const track of editor.tracks) {
+        for (const clip of track.clips) {
+          if (Math.abs(newTime - clip.startAt) < snapThreshold) {
+            newTime = clip.startAt;
+            snapped = true;
+            snapType = 'edge';
+            break;
+          }
+          if (Math.abs(newTime - (clip.startAt + clip.duration)) < snapThreshold) {
+            newTime = clip.startAt + clip.duration;
+            snapped = true;
+            snapType = 'edge';
+            break;
+          }
+        }
+        if (snapped) break;
+      }
+    }
+
+    // Check beat marker snaps
+    if (!snapped && editor.snapToBeat && editor.beatMarkers.length > 0) {
+      for (const marker of editor.beatMarkers) {
+        if (Math.abs(newTime - marker.time) < snapThreshold) {
+          newTime = marker.time;
+          snapped = true;
+          snapType = 'beat';
+          break;
+        }
+      }
+    }
+
+    if (snapped) {
+      activeSnapGuide = { time: newTime, type: snapType };
+      if (newTime !== lastSnapTime) {
+        editor.triggerHaptic('medium');
+        lastSnapTime = newTime;
+      }
+    } else {
+      activeSnapGuide = null;
+      lastSnapTime = -1;
+    }
+
+    editor.playhead = newTime;
+    masterAudioClock.seek(newTime, editor.tracks);
+    
+    // Find the topmost clip at this playhead position
+    for (const track of editor.tracks) {
+      for (const clip of track.clips) {
+        if (editor.playhead >= clip.startAt && editor.playhead <= clip.startAt + clip.duration) {
+           if (clip.assetId) {
+              const timeInClip = editor.playhead - clip.startAt;
+              const sourceTime = clip.sourceOffset + timeInClip;
+              triggerSeek(clip.assetId, sourceTime);
+           }
+           return; // Found the clip
+        }
+      }
+    }
+  }
+
+  function handleDragOver(e: DragEvent) {
+    e.preventDefault(); // allow drop
+    if (e.dataTransfer) {
+      e.dataTransfer.dropEffect = 'copy';
+    }
+  }
+
+  function handleDrop(e: DragEvent, trackId: string) {
+    e.preventDefault();
+    if (!e.dataTransfer) return;
+    
+    const assetId = e.dataTransfer.getData('application/x-editor-asset');
+    if (!assetId) return;
+
+    const asset = editor.assets.find(a => a.id === assetId);
+    if (!asset) return;
+
+    // Calculate drop time based on X coordinate
+    const rect = container?.getBoundingClientRect();
+    if (!rect) return;
+    const mouseX = e.clientX - rect.left - effectiveHeaderWidth;
+    let dropTime = Math.max(0, (mouseX + editor.scrollX) / editor.zoom);
+    
+    // Magnetic & Beat Snapping for Drop
+    const snapThreshold = 10 / editor.zoom;
+    let snapPoints: number[] = [editor.playhead];
+    
+    if (editor.isMagnetic) {
+         editor.tracks.forEach(t => t.clips.forEach(c => {
+             snapPoints.push(c.startAt);
+             snapPoints.push(c.startAt + c.duration);
+         }));
+    }
+    if (editor.snapToBeat) {
+         editor.beatMarkers.forEach(b => snapPoints.push(b.time));
+    }
+    
+    let bestSnap = dropTime;
+    let minDist = snapThreshold;
+    for (const p of snapPoints) {
+        const d = Math.abs(dropTime - p);
+        if (d < minDist) {
+             minDist = d;
+             bestSnap = p;
+        }
+    }
+    dropTime = bestSnap;
+    
+    // Create a new clip based on the dropped asset
+    editor.addClip(trackId, asset.name, dropTime, asset.duration || 10, asset.color, asset.id, { type: asset.type });
+    
+    // Auto-preview the dropped video
+    if (asset.type === 'video') {
+       triggerPreview(asset.id);
+    }
+  }
+
+  // Calculate visible ticks (very basic virtualization for ruler)
+  let visibleDuration = $derived(
+    (container && container.clientWidth) ? container.clientWidth / editor.zoom : editor.duration
+  );
+
+  function handleKeyDown(e: KeyboardEvent) {
+    const target = e.target as HTMLElement | null;
+    const isEditingText = target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable);
+    if (isEditingText) return;
+
+    if (e.code === 'Space') {
+      e.preventDefault();
+      editor.togglePlayback();
+    } else if (e.code === 'ArrowLeft') {
+      e.preventDefault();
+      editor.stepPlayhead(e.shiftKey ? -1.0 : -0.033);
+    } else if (e.code === 'ArrowRight') {
+      e.preventDefault();
+      editor.stepPlayhead(e.shiftKey ? 1.0 : 0.033);
+    } else if (e.code === 'Home') {
+      e.preventDefault();
+      editor.seekTo(0);
+    } else if (e.code === 'End') {
+      e.preventDefault();
+      editor.seekTo(editor.duration);
+    } else if (e.code === 'KeyS' && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      editor.splitClipAtPlayhead();
+    } else if (e.code === 'Delete' || e.code === 'Backspace') {
+      if (editor.selectedClipId) {
+        e.preventDefault();
+        editor.deleteClip();
+      }
+    } else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyZ') {
+      e.preventDefault();
+      if (e.shiftKey) {
+        editor.redo();
+      } else {
+        editor.undo();
+      }
+    } else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyY') {
+      e.preventDefault();
+      editor.redo();
+    } else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyD') {
+      e.preventDefault();
+      editor.duplicateClip();
+    } else if (e.code === 'Escape') {
+      editor.selectClip(null);
+    }
+  }
+
+  onMount(() => {
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  });
+
+  // Auto-scroll timeline to follow playhead during playback (keeps needle in comfortable viewport)
+  $effect(() => {
+    if (editor.isPlaying && !isDraggingPlayhead && !isPanning && activePointers.size === 0) {
+      const playheadPx = editor.playhead * editor.zoom;
+      if (isMobileMode && containerWidth > 0) {
+        editor.scrollX = Math.max(0, playheadPx - (containerWidth / 2));
+      } else if (containerWidth > 0) {
+        const visibleLeft = editor.scrollX;
+        const visibleRight = editor.scrollX + containerWidth - effectiveHeaderWidth;
+        if (playheadPx > visibleRight - 60) {
+          editor.scrollX = Math.max(0, playheadPx - 100);
+        } else if (playheadPx < visibleLeft) {
+          editor.scrollX = Math.max(0, playheadPx - 50);
+        }
+      }
+    }
+  });
+</script>
+
+<svelte:window onresize={() => {
+  if (isMobileMode && containerWidth > 0 && !isDraggingPlayhead) {
+     editor.scrollX = Math.max(0, editor.playhead * editor.zoom - (containerWidth / 2));
+  }
+}} />
+
+<div 
+  class="relative w-full h-full bg-transparent flex flex-col select-none overflow-hidden" 
+  bind:this={container}
+  style="touch-action: none;"
+  onpointerdown={handlePointerDown}
+  onpointermove={handlePointerMove}
+  onpointerup={handlePointerUp}
+  onpointercancel={handlePointerUp}
+  role="region"
+  aria-label="Zaman Çizelgesi Düzenleyici"
+>
+  <!-- Integrated Timeline Header Toolbar (2026 Spatial Glass NLE Layout) -->
+  <div 
+    class="h-10 px-3.5 border-b border-white/10 spatial-glass-subtle flex items-center justify-between z-20 flex-none select-none"
+    data-no-scrub="true"
+    role="toolbar"
+    tabindex={0}
+    aria-label="Zaman çizelgesi araç çubuğu"
+    onpointerdown={(e) => e.stopPropagation()}
+  >
+    <div class="flex items-center gap-2">
+      <!-- Magnetic Mode Toggle -->
+      <button 
+        class="px-2.5 py-1 rounded-lg flex items-center gap-1.5 text-xs transition-all cursor-pointer {editor.isMagnetic ? 'bg-sky-500/20 text-sky-300 border border-sky-500/35 font-semibold shadow-[0_0_10px_rgba(56,189,248,0.2)]' : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5 border border-transparent'}"
+        onpointerdown={(e) => e.stopPropagation()}
+        onclick={(e) => { 
+          e.stopPropagation();
+          editor.isMagnetic = !editor.isMagnetic; 
+          editor.announce(editor.isMagnetic ? 'Manyetik mod açık' : 'Manyetik mod kapalı'); 
+        }}
+        title={editor.isMagnetic ? "Manyetik Mod (Klipler silindiğinde boşlukları otomatik kapatır) Açık" : "Manyetik Modu Aç"}
+      >
+        <Magnet size={13} />
+        <span class="text-[11px]">Manyetik</span>
+      </button>
+
+      <!-- Beat Snap Toggle -->
+      <button 
+        class="px-2.5 py-1 rounded-lg flex items-center gap-1.5 text-xs transition-all cursor-pointer {editor.snapToBeat ? 'bg-amber-500/20 text-amber-300 border border-amber-500/35 font-semibold shadow-[0_0_10px_rgba(245,158,11,0.2)]' : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5 border border-transparent'}"
+        onpointerdown={(e) => e.stopPropagation()}
+        onclick={(e) => { 
+          e.stopPropagation();
+          editor.snapToBeat = !editor.snapToBeat; 
+          editor.announce(editor.snapToBeat ? 'Ritim yakalama açık' : 'Ritim yakalama kapalı'); 
+        }}
+        title={editor.activeBpm ? `${editor.activeBpm} BPM Müzik Ritim Noktalarına Yakala` : "Ritim Yakalama (Müzik vuruşlarına hizalar)"}
+      >
+        <Music size={13} />
+        <span class="text-[11px]">{editor.activeBpm ? `${editor.activeBpm} BPM` : 'Ritim'}</span>
+      </button>
+
+      <!-- Split / Razor shortcut in timeline header -->
+      <button
+        class="hidden sm:flex px-2.5 py-1 rounded-lg items-center gap-1.5 text-xs text-neutral-400 hover:text-white hover:bg-white/5 transition-all cursor-pointer border border-transparent"
+        onpointerdown={(e) => e.stopPropagation()}
+        onclick={(e) => {
+          e.stopPropagation();
+          editor.splitClipAtPlayhead();
+        }}
+        title="Klibi Oynatma Kafasından Böl (C)"
+      >
+        <Scissors size={13} class="text-sky-400" />
+        <span class="text-[11px]">Böl (C)</span>
+      </button>
+    </div>
+
+    <!-- Zoom Controls -->
+    <div class="flex items-center gap-1.5 spatial-glass px-2 py-0.5 rounded-lg border border-white/10">
+      <button 
+        class="p-1 rounded text-neutral-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+        onpointerdown={(e) => e.stopPropagation()}
+        onclick={(e) => {
+          e.stopPropagation();
+          setTimelineZoom(editor.zoom * 0.8);
+        }}
+        title="Zaman Çizelgesini Uzaklaştır"
+      >
+        <ZoomOut size={13} />
+      </button>
+      <span class="text-[11px] font-mono w-9 text-center text-neutral-300 font-semibold">{(editor.zoom).toFixed(0)}x</span>
+      <button 
+        class="p-1 rounded text-neutral-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
+        onpointerdown={(e) => e.stopPropagation()}
+        onclick={(e) => {
+          e.stopPropagation();
+          setTimelineZoom(editor.zoom * 1.25);
+        }}
+        title="Zaman Çizelgesini Yakınlaştır"
+      >
+        <ZoomIn size={13} />
+      </button>
+    </div>
+  </div>
+
+  <!-- Timeline Body -->
+  <div class="relative flex-1 flex overflow-hidden">
+    
+    <!-- Track Headers (Sticky Left Rail) -->
+    <div 
+      class="h-full spatial-glass-subtle border-r border-white/10 z-10 flex flex-col flex-none select-none transition-all duration-200"
+      style="width: {effectiveHeaderWidth}px;"
+    >
+      <!-- Ruler Spacer -->
+      <div class="h-7 border-b border-white/10 bg-neutral-950/40 flex items-center justify-center">
+        {#if !isMobileMode}
+          <span class="text-[9px] font-mono font-bold text-neutral-400 uppercase tracking-widest">Kanallar</span>
+        {/if}
+      </div>
+      
+      <div class="relative flex-1" style="transform: translate3d(0, -{editor.scrollY}px, 0)">
+        {#each editor.tracks as track, trackIndex}
+          <div class="h-14 border-b border-white/5 flex items-center justify-between px-2 bg-neutral-950/40 hover:bg-white/[0.03] transition-colors">
+            <div class="flex items-center gap-1.5 min-w-0">
+              {#if track.name.startsWith('V')}
+                <span class="px-2 py-0.5 rounded-lg text-[10px] font-extrabold font-mono bg-sky-500/20 text-sky-300 border border-sky-500/35 shadow-[0_0_8px_rgba(56,189,248,0.2)] select-none">V{trackIndex + 1}</span>
+              {:else if track.name.startsWith('A')}
+                <span class="px-2 py-0.5 rounded-lg text-[10px] font-extrabold font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/35 shadow-[0_0_8px_rgba(16,185,129,0.2)] select-none">A{trackIndex + 1}</span>
+              {:else}
+                <span class="px-2 py-0.5 rounded-lg text-[10px] font-bold font-mono bg-purple-500/20 text-purple-300 border border-purple-500/35 select-none truncate">{track.name}</span>
+              {/if}
+            </div>
+            
+            {#if !isMobileMode}
+            <div class="flex items-center gap-1">
+              <button 
+                class="w-6 h-6 rounded-lg flex items-center justify-center transition-all cursor-pointer {track.isMuted ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-[0_0_6px_rgba(245,158,11,0.3)]' : 'text-neutral-500 hover:text-white hover:bg-white/10'}" 
+                onclick={() => { track.isMuted = !track.isMuted; editor.saveState(); }}
+                title={track.isMuted ? "Sesi Aç" : "Sesi Kapat (Mute)"}
+              >
+                {#if track.isMuted}
+                  <VolumeX size={12} />
+                {:else}
+                  <Volume2 size={12} />
+                {/if}
+              </button>
+              <button 
+                class="w-6 h-6 rounded-lg flex items-center justify-center transition-all cursor-pointer {track.isLocked ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 shadow-[0_0_6px_rgba(244,63,94,0.3)]' : 'text-neutral-500 hover:text-white hover:bg-white/10'}" 
+                onclick={() => { track.isLocked = !track.isLocked; editor.saveState(); }}
+                title={track.isLocked ? "Kilidi Aç" : "Kanalı Kilitle"}
+              >
+                {#if track.isLocked}
+                  <Lock size={12} />
+                {:else}
+                  <Unlock size={12} />
+                {/if}
+              </button>
+            </div>
+            {/if}
+          </div>
+        {/each}
+      </div>
+    </div>
+
+    <!-- Tracks Canvas (Scrollable) -->
+    <div class="relative flex-1 h-full overflow-hidden bg-neutral-900/50">
+      <TimelineStage />
+      
+      <!-- Adaptive NLE Ruler (Spatial Glass) -->
+      <div 
+        class="absolute top-0 left-0 right-0 h-7 border-b border-white/10 spatial-glass-subtle z-10 select-none overflow-hidden"
+      >
+        <div class="relative w-full h-full" style="transform: translate3d(-{editor.scrollX}px, 0, 0)">
+          {#each rulerTicks as tick}
+            {#if tick.isMajor}
+              <div 
+                class="absolute top-1 font-mono text-[10px] text-neutral-300 font-semibold whitespace-nowrap select-none pointer-events-none"
+                style="left: {tick.left + 4}px;"
+              >
+                {tick.label}
+              </div>
+              <div 
+                class="absolute bottom-0 w-px bg-white/40 h-3 pointer-events-none" 
+                style="left: {tick.left}px;"
+              ></div>
+            {:else}
+              <div 
+                class="absolute bottom-0 w-px bg-white/15 h-1.5 pointer-events-none" 
+                style="left: {tick.left}px;"
+              ></div>
+            {/if}
+          {/each}
+
+          <!-- Beat Markers along ruler -->
+          {#if editor.beatMarkers.length > 0}
+            {#each editor.beatMarkers as marker}
+              <div 
+                class="absolute bottom-0 w-1.5 h-3 -translate-x-1/2 flex flex-col items-center pointer-events-none z-10"
+                style="left: {marker.time * editor.zoom}px;"
+                title="{marker.label || 'Vuruş'} ({marker.time.toFixed(2)}s)"
+              >
+                <div class="w-2 h-2 rounded-full bg-amber-400 shadow-[0_0_8px_rgba(251,191,36,0.9)] animate-pulse"></div>
+                <div class="w-0.5 h-1.5 bg-amber-400/80"></div>
+              </div>
+            {/each}
+          {/if}
+        </div>
+      </div>
+
+      <!-- Tracks Container -->
+      <div 
+        class="absolute top-7 left-0 right-0 bottom-0"
+        style="transform: translate3d(-{editor.scrollX}px, -{editor.scrollY}px, 0); width: {editor.duration * editor.zoom}px;"
+      >
+        {#if editor.tracks.every(t => t.clips.length === 0)}
+          <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-neutral-500 gap-2 select-none z-0">
+            <p class="text-xs font-semibold text-neutral-300">Zaman Çizelgesi Boş</p>
+            <p class="text-[11px] text-neutral-500 font-mono">Medya havuzundan video veya ses sürükleyip kanala bırakın</p>
+          </div>
+        {/if}
+
+        {#each editor.tracks as track, trackIndex}
+          {@const visibleClips = track.clips.filter(clip => clip.startAt <= viewportEnd && (clip.startAt + clip.duration) >= viewportStart)}
+          <div 
+            role="region"
+            aria-label="Kanal {trackIndex + 1}"
+            class="absolute left-0 right-0 h-14 border-b border-white/5 flex items-center group {track.isLocked ? 'opacity-50 pointer-events-none' : ''}"
+            style="top: {trackIndex * TRACK_HEIGHT}px;"
+            ondragover={handleDragOver}
+            ondrop={(e) => handleDrop(e, track.id)}
+          >
+            <!-- Background grid subtle markers -->
+            <div class="absolute inset-0 pointer-events-none opacity-10" 
+                 style="background-image: repeating-linear-gradient(to right, transparent, transparent {editor.zoom - 1}px, #888888 {editor.zoom}px);">
+            </div>
+            
+            {#each visibleClips as clip (clip.id)}
+              {@render timelineClip(clip)}
+            {/each}
+          </div>
+        {/each}
+
+        <!-- Magnetic / Beat Snap Indicator Line -->
+        {#if activeSnapGuide}
+          <div 
+            class="absolute top-0 bottom-0 w-[2px] z-25 pointer-events-none transition-opacity duration-150 animate-pulse {activeSnapGuide.type === 'beat' ? 'bg-amber-400 shadow-[0_0_12px_rgba(251,191,36,0.9)]' : 'bg-cyan-400 shadow-[0_0_12px_rgba(34,211,238,0.9)]'}"
+            style="transform: translate3d({activeSnapGuide.time * editor.zoom}px, 0, 0);"
+          >
+            <div class="absolute -top-6 -left-2 px-1.5 py-0.5 rounded text-[8px] font-mono font-bold uppercase {activeSnapGuide.type === 'beat' ? 'bg-amber-500 text-black shadow-md' : 'bg-cyan-500 text-black shadow-md'}">
+              {activeSnapGuide.type === 'beat' ? 'Ritim' : 'Snap'}
+            </div>
+          </div>
+        {/if}
+
+        <!-- Playhead Line (Neon Laser 2026) -->
+        <div 
+          class="absolute top-0 bottom-0 w-[2px] bg-gradient-to-b from-rose-500 via-purple-500 to-indigo-500 shadow-[0_0_12px_rgba(244,63,94,0.85)] z-30 pointer-events-none origin-top"
+          style="transform: translate3d({editor.playhead * editor.zoom}px, 0, 0);"
+        >
+          <!-- Playhead Head in Ruler Area (Touch-Friendly Ruby Diamond Marker) -->
+          <div 
+            class="absolute -top-7 -left-3 w-6 h-7 flex flex-col items-center pointer-events-auto cursor-ew-resize active:scale-125 transition-transform"
+          >
+            <div class="w-5 h-4 bg-gradient-to-b from-rose-500 to-rose-600 rounded-t-md shadow-[0_0_10px_rgba(244,63,94,0.9)] flex items-center justify-center border border-white/40">
+              <div class="w-1 h-2 bg-white rounded-full shadow-sm"></div>
+            </div>
+            <div class="w-0 h-0 border-l-[10px] border-l-transparent border-r-[10px] border-r-transparent border-t-[8px] border-t-rose-600"></div>
+          </div>
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Radial Context Menu -->
+  {#if radialMenuContext}
+    {@const ctx = radialMenuContext}
+    <div 
+      class="radial-menu-container fixed z-[100]"
+      style="left: {ctx.x}px; top: {ctx.y}px;"
+    >
+      <div class="absolute -translate-x-1/2 -translate-y-1/2 w-48 h-48 rounded-full pointer-events-none animate-in zoom-in-50 duration-200">
+        <!-- Close Center -->
+        <button 
+          class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 w-12 h-12 rounded-full bg-neutral-900/90 border border-white/20 text-white flex items-center justify-center pointer-events-auto shadow-2xl active:scale-95 transition-all backdrop-blur-md"
+          onclick={() => radialMenuContext = null}
+        >
+          <X size={20} />
+        </button>
+        
+        <!-- Action 1: Split (Top) -->
+        <button 
+          class="absolute w-10 h-10 rounded-full bg-neutral-800/95 border border-white/10 text-sky-400 flex items-center justify-center pointer-events-auto shadow-xl hover:bg-neutral-700 hover:scale-110 active:scale-95 transition-all backdrop-blur-md"
+          style="left: calc(50% - 20px); top: calc(50% - 20px - 68px);"
+          onclick={() => { editor.splitClipAtPlayhead(ctx.clipId); radialMenuContext = null; }}
+          title="Böl"
+        >
+          <Scissors size={18} />
+        </button>
+
+        <!-- Action 2: Duplicate (Right) -->
+        <button 
+          class="absolute w-10 h-10 rounded-full bg-neutral-800/95 border border-white/10 text-indigo-400 flex items-center justify-center pointer-events-auto shadow-xl hover:bg-neutral-700 hover:scale-110 active:scale-95 transition-all backdrop-blur-md"
+          style="left: calc(50% - 20px + 68px); top: calc(50% - 20px);"
+          onclick={() => { editor.duplicateClip(ctx.clipId); radialMenuContext = null; }}
+          title="Çoğalt"
+        >
+          <Plus size={18} />
+        </button>
+
+        <!-- Action 3: Delete (Bottom) -->
+        <button 
+          class="absolute w-10 h-10 rounded-full bg-rose-900/80 border border-rose-500/30 text-rose-300 flex items-center justify-center pointer-events-auto shadow-xl hover:bg-rose-800 hover:scale-110 active:scale-95 transition-all backdrop-blur-md"
+          style="left: calc(50% - 20px); top: calc(50% - 20px + 68px);"
+          onclick={() => { editor.deleteClip(ctx.clipId); radialMenuContext = null; }}
+          title="Sil"
+        >
+          <Trash2 size={18} />
+        </button>
+
+        <!-- Action 4: Settings/Inspector (Left) -->
+        <button 
+          class="absolute w-10 h-10 rounded-full bg-neutral-800/95 border border-white/10 text-neutral-300 flex items-center justify-center pointer-events-auto shadow-xl hover:bg-neutral-700 hover:scale-110 active:scale-95 transition-all backdrop-blur-md"
+          style="left: calc(50% - 20px - 68px); top: calc(50% - 20px);"
+          onclick={() => { editor.openBottomSheet('inspector'); radialMenuContext = null; }}
+          title="Müfettiş"
+        >
+          <Sliders size={18} />
+        </button>
+      </div>
+    </div>
+  {/if}
+
+  <!-- Screen Reader Announcements (WCAG 2.2 Live Region) -->
+  <div class="sr-only" role="status" aria-live="polite" aria-atomic="true">
+    {editor.announcement}
+  </div>
+</div>
+
+{#snippet timelineClip(clip: TimelineClip)}
+  <!-- Outer Clip Container (2026 Spatial Glass Capsule) -->
+  <div 
+    role="button"
+    tabindex="0"
+    aria-label="{clip.name}, Başlangıç: {clip.startAt.toFixed(2)}s, Süre: {clip.duration.toFixed(2)}s."
+    aria-pressed={editor.selectedClipId === clip.id}
+    class="absolute top-1 bottom-1 rounded-xl shadow-lg border cursor-pointer select-none transition-all group/clip overflow-hidden backdrop-blur-md focus-visible:outline-none {editor.selectedClipId === clip.id ? 'ring-2 ring-purple-400 border-white shadow-[0_0_20px_rgba(168,85,247,0.45)] brightness-110 z-20' : 'border-white/10 hover:border-white/25 brightness-100'}"
+    style="left: {clip.startAt * editor.zoom}px; width: {clip.duration * editor.zoom}px; background: {clip.type === 'audio' ? 'linear-gradient(135deg, rgba(6, 78, 59, 0.85) 0%, rgba(16, 185, 129, 0.5) 100%)' : clip.type === 'text' ? 'linear-gradient(135deg, rgba(120, 53, 15, 0.85) 0%, rgba(245, 158, 11, 0.5) 100%)' : 'linear-gradient(135deg, rgba(30, 58, 138, 0.85) 0%, rgba(37, 99, 235, 0.5) 100%)'};"
+    onpointerdown={(e) => handleClipPointerDown(e, clip, 'move')}
+    oncontextmenu={(e) => handleClipContextMenu(e, clip)}
+    onkeydown={(e) => {
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault();
+        editor.selectClip(clip.id);
+      } else if (e.key === 'Delete' || e.key === 'Backspace') {
+        e.preventDefault();
+        editor.deleteClip(clip.id);
+      }
+    }}
+  >
+    <!-- Top inner highlight specular glass line -->
+    <div class="absolute top-0 inset-x-0 h-[1.5px] bg-gradient-to-r from-white/40 via-white/80 to-white/40 pointer-events-none"></div>
+
+    <!-- Connected Clip Anchor Pin (Primary Storyline Link) -->
+    {#if clip.parentClipId}
+      <div 
+        class="absolute -top-1 left-2 w-2 h-2 rounded-full bg-cyan-400 border border-neutral-900 shadow-sm z-20 pointer-events-none"
+        title="Ana Kurgu Omurgasına Bağlı Klip (Connected Clip)"
+      ></div>
+    {/if}
+
+    <!-- Clip Inner Content -->
+    <div class="w-full h-full relative pointer-events-none overflow-hidden">
+      {#if clip.assetId}
+        <div class="opacity-70">
+          <Waveform 
+             assetId={clip.assetId} 
+             color={clip.color} 
+             sourceOffset={clip.sourceOffset} 
+             duration={clip.duration} 
+             zoom={editor.zoom} 
+          />
+        </div>
+      {/if}
+
+      <!-- VAD Silences (Context-Aware) -->
+      {#if clip.vadSilences}
+        {#each clip.vadSilences as silence}
+          {@const silenceStart = Math.max(0, silence.start - clip.sourceOffset)}
+          {@const silenceEnd = Math.min(clip.duration, silence.end - clip.sourceOffset)}
+          {#if silenceEnd > 0 && silenceStart < clip.duration && silenceEnd > silenceStart}
+            <div 
+              class="absolute top-0 bottom-0 pointer-events-none z-0 border-l border-r border-rose-500/30"
+              style="left: {silenceStart * editor.zoom}px; width: {(silenceEnd - silenceStart) * editor.zoom}px; background-image: repeating-linear-gradient(45deg, transparent, transparent 4px, rgba(244, 63, 94, 0.15) 4px, rgba(244, 63, 94, 0.15) 8px);"
+            >
+               <div class="absolute top-1 left-1 bg-rose-500/80 text-[8px] font-mono font-bold text-white px-1 rounded-sm shadow-sm opacity-60 truncate">SESSİZ</div>
+            </div>
+          {/if}
+        {/each}
+      {/if}
+
+      <!-- Whisper Transcripts (Context-Aware) -->
+      {#if clip.subtitles}
+        {#each clip.subtitles as sub}
+          {#if sub.words}
+            {#each sub.words as word}
+              {@const wordStart = Math.max(0, word.start - clip.sourceOffset)}
+              {@const wordEnd = Math.min(clip.duration, word.end - clip.sourceOffset)}
+              {#if wordEnd > 0 && wordStart < clip.duration && wordEnd > wordStart}
+                <div 
+                  class="absolute bottom-1 h-3.5 bg-neutral-900/80 border border-white/10 rounded-sm flex items-center justify-center overflow-hidden z-10"
+                  style="left: {wordStart * editor.zoom}px; width: {(wordEnd - wordStart) * editor.zoom}px;"
+                >
+                  <span class="text-[8px] text-white/90 whitespace-nowrap truncate px-0.5 pointer-events-none select-none">{word.word}</span>
+                </div>
+              {/if}
+            {/each}
+          {/if}
+        {/each}
+      {/if}
+      
+      <div class="absolute inset-0 px-2 flex items-center justify-between z-10 pointer-events-none">
+        <div class="flex items-center gap-1.5 min-w-0">
+          {#if clip.isBgRemoved || clip.cropRect || clip.name.startsWith('TTS:') || clip.name.includes('[Parça')}
+            <span class="p-0.5 rounded bg-black/40 text-amber-300 flex-none" title="AI Destekli Klip">
+              <Sparkles size={9} />
+            </span>
+          {/if}
+          {#if clip.transitionIn || clip.transitionOut}
+            <span class="px-1 py-0.2 bg-indigo-900/80 border border-indigo-400/40 text-indigo-200 rounded text-[9px] font-mono flex-none" title="Geçiş Aktif">
+              {clip.transitionIn?.type || clip.transitionOut?.type}
+            </span>
+          {/if}
+          {#if clip.speedCurve}
+            <span class="px-1 py-0.2 bg-amber-900/80 border border-amber-400/50 text-amber-200 rounded text-[9px] font-mono flex items-center gap-0.5 flex-none" title="Hız Eğrisi: {clip.speedCurve.preset}">
+              <Gauge size={8} />
+              <span>{clip.speedCurve.preset}</span>
+            </span>
+          {:else if clip.speed && clip.speed !== 1.0}
+            <span class="px-1 py-0.2 bg-neutral-900/80 border border-white/20 text-amber-300 rounded text-[9px] font-mono flex-none">
+              {clip.speed}x
+            </span>
+          {/if}
+          {#if clip.audioEnvelope && (clip.audioEnvelope.fadeIn > 0 || clip.audioEnvelope.fadeOut > 0 || clip.audioEnvelope.ducking)}
+            <span class="px-1 py-0.2 bg-emerald-900/80 border border-emerald-400/50 text-emerald-200 rounded text-[9px] font-mono flex items-center gap-0.5 flex-none" title="Ses Zarfı / Ducking Aktif">
+              <Sliders size={8} />
+              <span>{clip.audioEnvelope.ducking ? 'Ducking' : 'Fade'}</span>
+            </span>
+          {/if}
+          <span class="text-[11px] font-medium text-white/95 truncate block">{clip.name}</span>
+        </div>
+        <span class="text-[10px] font-mono text-white/60 ml-1.5 flex-none select-none">{clip.duration.toFixed(1)}s</span>
+      </div>
+    </div>
+      
+    <!-- Sleek Trim Handles (Internal touch-friendly edges with 44px+ mobile touch tap area) -->
+    <div 
+       role="slider"
+       tabindex="0"
+       aria-label="{clip.name} sol kırpma tutamacı"
+       aria-valuenow={clip.startAt}
+       class="absolute left-0 top-0 bottom-0 w-7 sm:w-4 cursor-ew-resize flex items-center justify-center z-20 pointer-events-auto transition-colors hover:bg-white/30 active:bg-white/40 touch-none {editor.selectedClipId === clip.id ? 'bg-white/20 opacity-100 shadow-[inset_2px_0_0_#fff]' : 'opacity-40 md:opacity-0 md:group-hover/clip:opacity-100'}"
+       onpointerdown={(e) => handleClipPointerDown(e, clip, 'trim-left')}
+       onkeydown={(e) => {
+         if (e.key === 'ArrowLeft') {
+           e.preventDefault();
+           editor.updateClipBounds(clip.id, clip.startAt - 0.1, clip.duration + 0.1, clip.sourceOffset - 0.1);
+         } else if (e.key === 'ArrowRight') {
+           e.preventDefault();
+           editor.updateClipBounds(clip.id, clip.startAt + 0.1, clip.duration - 0.1, clip.sourceOffset + 0.1);
+         }
+       }}
+    >
+       <div class="w-1.5 sm:w-1 h-7 sm:h-5 bg-white rounded-full shadow-[0_0_8px_rgba(255,255,255,0.9)] flex items-center justify-center">
+         <div class="w-0.5 h-3 bg-neutral-900/60 rounded-full sm:hidden"></div>
+       </div>
+    </div>
+    <div 
+       role="slider"
+       tabindex="0"
+       aria-label="{clip.name} sağ kırpma tutamacı"
+       aria-valuenow={clip.startAt + clip.duration}
+       class="absolute right-0 top-0 bottom-0 w-7 sm:w-4 cursor-ew-resize flex items-center justify-center z-20 pointer-events-auto transition-colors hover:bg-white/30 active:bg-white/40 touch-none {editor.selectedClipId === clip.id ? 'bg-white/20 opacity-100 shadow-[inset_-2px_0_0_#fff]' : 'opacity-40 md:opacity-0 md:group-hover/clip:opacity-100'}"
+       onpointerdown={(e) => handleClipPointerDown(e, clip, 'trim-right')}
+       onkeydown={(e) => {
+         if (e.key === 'ArrowLeft') {
+           e.preventDefault();
+           editor.updateClipBounds(clip.id, clip.startAt, clip.duration - 0.1, clip.sourceOffset);
+         } else if (e.key === 'ArrowRight') {
+           e.preventDefault();
+           editor.updateClipBounds(clip.id, clip.startAt, clip.duration + 0.1, clip.sourceOffset);
+         }
+       }}
+    >
+       <div class="w-1.5 sm:w-1 h-7 sm:h-5 bg-white rounded-full shadow-[0_0_8px_rgba(255,255,255,0.9)] flex items-center justify-center">
+         <div class="w-0.5 h-3 bg-neutral-900/60 rounded-full sm:hidden"></div>
+       </div>
+    </div>
+  </div>
+{/snippet}
