@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, untrack } from 'svelte';
+  import { SvelteMap } from 'svelte/reactivity';
   import { editor } from './lib/editor.svelte';
   import type { TimelineClip } from './lib/types';
   import { updateAudioEngine, ensureAudioUnlocked } from './lib/audio';
@@ -99,7 +100,7 @@
   let initialMonitorPinchDist = 0;
   let initialCanvasScale = 1;
   let canvasScale = $state(1);
-  let activeMonitorPointers = new Map<number, PointerEvent>();
+  let activeMonitorPointers = new SvelteMap<number, PointerEvent>();
 
   function toggleFullscreen() {
     isFullscreen = !isFullscreen;
@@ -987,13 +988,27 @@
               <span>Tam Ekrandan Çık</span>
             </button>
           {/if}
-          <!-- Scaling wrapper -->
-          <div 
-            class="w-full h-full flex items-center justify-center transition-transform duration-75 origin-center pointer-events-none"
-            style="transform: scale({canvasScale});"
-          >
-            <canvas bind:this={canvasRef} class="w-full h-full object-contain pointer-events-none"></canvas>
-          </div>
+          <!-- Scaling wrapper with Svelte 5 Error Boundary -->
+          <svelte:boundary>
+            <div 
+              class="w-full h-full flex items-center justify-center transition-transform duration-75 origin-center pointer-events-none"
+              style="transform: scale({canvasScale});"
+            >
+              <canvas bind:this={canvasRef} class="w-full h-full object-contain pointer-events-none"></canvas>
+            </div>
+            {#snippet failed(error, reset)}
+              <div class="flex flex-col items-center justify-center p-6 text-center text-red-400 gap-3">
+                <span class="text-sm font-semibold">Video Monitörü Hatası</span>
+                <p class="text-xs text-neutral-400 max-w-xs">{error instanceof Error ? error.message : 'Görüntü oluşturulamadı'}</p>
+                <button 
+                  onclick={() => reset()} 
+                  class="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-white rounded-lg text-xs font-medium cursor-pointer transition-colors"
+                >
+                  Monitörü Yenile
+                </button>
+              </div>
+            {/snippet}
+          </svelte:boundary>
 
           <!-- Visual Tap Feedback Indicator (Play / Pause Ripple) -->
           {#if monitorFeedback}
@@ -1225,24 +1240,38 @@
       id="timeline-section" 
       class="transition-all duration-300 ease-in-out flex-none spatial-glass lg:rounded-2xl border-t lg:border border-white/10 relative z-10 overflow-hidden shadow-2xl {timelineHeightClass}"
     >
-      {#if editor.mobileWorkspace === 'timeline'}
-        <Timeline />
-      {:else if editor.mobileWorkspace === 'filters'}
-        <div class="flex-1 overflow-hidden flex flex-col h-full w-full">
-          <FiltersSheet isBottomDocked={true} onClose={() => { editor.mobileWorkspace = 'timeline'; }} />
-        </div>
-      {:else}
-        <!-- Mobile workspace panel swapping logic (hidden on lg, takes timeline spot) -->
-        <div class="flex-1 lg:hidden spatial-glass overflow-hidden flex flex-col h-full w-full">
-          <div class="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-            <StudioSidebar isMobileSheet={false} hideTabs={true} onClose={() => { editor.mobileWorkspace = 'timeline'; }} />
-          </div>
-        </div>
-        <!-- On desktop, show timeline -->
-        <div class="hidden lg:flex flex-1 w-full h-full">
+      <svelte:boundary>
+        {#if editor.mobileWorkspace === 'timeline'}
           <Timeline />
-        </div>
-      {/if}
+        {:else if editor.mobileWorkspace === 'filters'}
+          <div class="flex-1 overflow-hidden flex flex-col h-full w-full">
+            <FiltersSheet isBottomDocked={true} onClose={() => { editor.mobileWorkspace = 'timeline'; }} />
+          </div>
+        {:else}
+          <!-- Mobile workspace panel swapping logic (hidden on lg, takes timeline spot) -->
+          <div class="flex-1 lg:hidden spatial-glass overflow-hidden flex flex-col h-full w-full">
+            <div class="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+              <StudioSidebar isMobileSheet={false} hideTabs={true} onClose={() => { editor.mobileWorkspace = 'timeline'; }} />
+            </div>
+          </div>
+          <!-- On desktop, show timeline -->
+          <div class="hidden lg:flex flex-1 w-full h-full">
+            <Timeline />
+          </div>
+        {/if}
+        {#snippet failed(error, reset)}
+          <div class="h-full w-full flex flex-col items-center justify-center p-6 text-center text-amber-400 gap-2">
+            <span class="text-xs font-semibold">Zaman Çizelgesi Yükleme Hatası</span>
+            <p class="text-[11px] text-neutral-400">{error instanceof Error ? error.message : 'Hata oluştu'}</p>
+            <button 
+              onclick={() => reset()} 
+              class="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-white text-xs font-medium rounded-lg cursor-pointer transition-colors"
+            >
+              Yeniden Başlat
+            </button>
+          </div>
+        {/snippet}
+      </svelte:boundary>
     </section>
 
     <!-- Contextual Bottom Action Bar (Thumb Zone) - Hidden on Desktop -->
@@ -1253,19 +1282,33 @@
   </div>
 
   <BottomSheet isOpen={editor.activeBottomSheet !== null} onClose={() => editor.closeBottomSheet()}>
-    {#if editor.activeBottomSheet === 'transitions'}
-      <TransitionsPicker />
-    {:else if editor.activeBottomSheet === 'subtitle_style'}
-      <SubtitleStyleSheet />
-    {:else if editor.activeBottomSheet === 'speed_curve'}
-      <SpeedCurveSheet />
-    {:else if editor.activeBottomSheet === 'audio_envelope'}
-      <AudioEnvelopeSheet />
-    {:else if editor.activeBottomSheet === 'filters'}
-      <FiltersSheet onClose={() => editor.closeBottomSheet()} />
-    {:else if editor.activeBottomSheet}
-      <StudioSidebar isMobileSheet={true} onClose={() => editor.closeBottomSheet()} />
-    {/if}
+    <svelte:boundary>
+      {#if editor.activeBottomSheet === 'transitions'}
+        <TransitionsPicker />
+      {:else if editor.activeBottomSheet === 'subtitle_style'}
+        <SubtitleStyleSheet />
+      {:else if editor.activeBottomSheet === 'speed_curve'}
+        <SpeedCurveSheet />
+      {:else if editor.activeBottomSheet === 'audio_envelope'}
+        <AudioEnvelopeSheet />
+      {:else if editor.activeBottomSheet === 'filters'}
+        <FiltersSheet onClose={() => editor.closeBottomSheet()} />
+      {:else if editor.activeBottomSheet}
+        <StudioSidebar isMobileSheet={true} onClose={() => editor.closeBottomSheet()} />
+      {/if}
+      {#snippet failed(error, reset)}
+        <div class="p-6 text-center space-y-3">
+          <p class="text-sm font-medium text-red-400">Panel içeriği yüklenirken hata oluştu.</p>
+          <p class="text-xs text-neutral-400">{error instanceof Error ? error.message : 'Bilinmeyen hata'}</p>
+          <button 
+            onclick={() => reset()} 
+            class="px-4 py-2 bg-neutral-800 hover:bg-neutral-700 text-white text-xs font-semibold rounded-xl cursor-pointer transition-colors"
+          >
+            Yeniden Dene
+          </button>
+        </div>
+      {/snippet}
+    </svelte:boundary>
   </BottomSheet>
 
   <ExportModal bind:isOpen={editor.isExportOpen} />

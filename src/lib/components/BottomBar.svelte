@@ -94,7 +94,7 @@
         max="2" 
         step="0.05" 
         value={selectedClip.volume ?? 1}
-        oninput={(e) => handleVolumeChange(parseFloat((e.target as HTMLInputElement).value))}
+        oninput={(e) => handleVolumeChange(e.currentTarget.valueAsNumber)}
         class="flex-1 max-w-xs accent-emerald-500 h-1.5 bg-neutral-800 rounded appearance-none cursor-pointer"
       />
       <button

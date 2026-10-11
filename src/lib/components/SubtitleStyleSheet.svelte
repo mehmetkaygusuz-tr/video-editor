@@ -158,7 +158,7 @@
         max="48"
         step="2"
         value={editor.globalSubtitleStyle.fontSize}
-        oninput={(e) => editor.updateGlobalSubtitleStyle({ fontSize: Number((e.target as HTMLInputElement).value) })}
+        oninput={(e) => editor.updateGlobalSubtitleStyle({ fontSize: e.currentTarget.valueAsNumber })}
         class="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
       />
     </div>
@@ -177,7 +177,7 @@
         max="90"
         step="2"
         value={editor.globalSubtitleStyle.positionY}
-        oninput={(e) => editor.updateGlobalSubtitleStyle({ positionY: Number((e.target as HTMLInputElement).value) })}
+        oninput={(e) => editor.updateGlobalSubtitleStyle({ positionY: e.currentTarget.valueAsNumber })}
         class="w-full h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-purple-500"
       />
     </div>

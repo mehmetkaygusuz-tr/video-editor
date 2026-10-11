@@ -231,7 +231,7 @@
           max="5.0"
           step="0.1"
           value={points[selectedPointIndex]?.speed ?? 1.0}
-          oninput={(e) => updateSelectedPointSpeed(parseFloat((e.target as HTMLInputElement).value))}
+          oninput={(e) => updateSelectedPointSpeed(e.currentTarget.valueAsNumber)}
           class="flex-1 h-1.5 bg-neutral-800 rounded-lg appearance-none cursor-pointer accent-amber-500"
         />
         <span class="font-mono text-xs font-bold text-amber-400 min-w-[40px] text-right">

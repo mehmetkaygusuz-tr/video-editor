@@ -74,7 +74,7 @@
           max="2"
           step="0.05"
           value={selectedClip.volume ?? 1}
-          oninput={(e) => editor.setClipVolume(selectedClip.id, parseFloat((e.target as HTMLInputElement).value))}
+          oninput={(e) => editor.setClipVolume(selectedClip.id, e.currentTarget.valueAsNumber)}
           class="w-full accent-emerald-400 h-1.5 bg-neutral-800 rounded-full appearance-none cursor-pointer"
         />
         <div class="flex justify-end pt-1">
@@ -215,7 +215,7 @@
           </div>
           <input type="range" min="0" max="3" step="0.05" 
             value={selectedClip.colorGrading?.contrast ?? 1}
-            oninput={(e) => editor.updateClip(selectedClip.id, { colorGrading: { ...(selectedClip.colorGrading || {}), contrast: parseFloat((e.target as HTMLInputElement).value) } })}
+            oninput={(e) => editor.updateClip(selectedClip.id, { colorGrading: { ...(selectedClip.colorGrading || {}), contrast: e.currentTarget.valueAsNumber } })}
             class="w-full accent-cyan-400 h-1 bg-neutral-800 rounded appearance-none cursor-pointer" />
         </div>
 
@@ -226,7 +226,7 @@
           </div>
           <input type="range" min="0" max="3" step="0.05" 
             value={selectedClip.colorGrading?.saturation ?? 1}
-            oninput={(e) => editor.updateClip(selectedClip.id, { colorGrading: { ...(selectedClip.colorGrading || {}), saturation: parseFloat((e.target as HTMLInputElement).value) } })}
+            oninput={(e) => editor.updateClip(selectedClip.id, { colorGrading: { ...(selectedClip.colorGrading || {}), saturation: e.currentTarget.valueAsNumber } })}
             class="w-full accent-cyan-400 h-1 bg-neutral-800 rounded appearance-none cursor-pointer" />
         </div>
 

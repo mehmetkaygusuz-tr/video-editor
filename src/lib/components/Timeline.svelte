@@ -1,5 +1,6 @@
 <script lang="ts">
   import { untrack } from 'svelte';
+  import { SvelteMap } from 'svelte/reactivity';
   import { editor } from '../editor.svelte';
   import { aiService } from '../engine/aiService.svelte';
   import { masterAudioClock } from '../engine/audioClock';
@@ -15,19 +16,20 @@
   const TRACK_HEIGHT = 56;
   const RULER_HEIGHT = 28;
 
-  let container: HTMLDivElement | undefined = $state();
+  let container = $state<HTMLDivElement>();
+  let containerWidth = $state<number>(1920);
+  let containerHeight = $state<number>(240);
   let isDraggingPlayhead = false;
   let isPanning = false;
   let lastPanX = 0;
   let lastPanY = 0;
   
-  let activePointers = new Map<number, PointerEvent>();
+  let activePointers = new SvelteMap<number, PointerEvent>();
   let initialPinchDistance = 0;
   let initialZoom = 100;
   let initialPinchCentroidTime = 0;
   let activeSnapGuide = $state<{ time: number; type: 'edge' | 'beat' } | null>(null);
 
-  const containerWidth = $derived(container?.clientWidth || 1920);
   const isMobileMode = $derived(containerWidth < 768);
   const effectiveHeaderWidth = $derived(isMobileMode ? 44 : 96);
   const viewportStart = $derived(editor.scrollX / editor.zoom);
@@ -39,7 +41,7 @@
   // Clamp vertical scroll so timeline never scrolls down into empty space
   const maxScrollY = $derived.by(() => {
     const totalTracksHeight = editor.tracks.length * 56;
-    const availableHeight = Math.max(80, (container?.clientHeight || 240) - 28);
+    const availableHeight = Math.max(80, containerHeight - 28);
     return Math.max(0, totalTracksHeight - availableHeight);
   });
 
@@ -603,7 +605,7 @@
 
     // Auto-scroll when scrubbing near viewport edges
     const edgeMargin = 35;
-    if (mouseX > (container?.clientWidth || 800) - effectiveHeaderWidth - edgeMargin) {
+    if (mouseX > containerWidth - effectiveHeaderWidth - edgeMargin) {
       editor.scrollX = Math.max(0, editor.scrollX + 6);
     } else if (mouseX < edgeMargin && editor.scrollX > 0) {
       editor.scrollX = Math.max(0, editor.scrollX - 6);
@@ -781,7 +783,7 @@
 
   // Calculate visible ticks (very basic virtualization for ruler)
   let visibleDuration = $derived(
-    (container && container.clientWidth) ? container.clientWidth / editor.zoom : editor.duration
+    containerWidth > 0 ? containerWidth / editor.zoom : editor.duration
   );
 
   function handleKeyDown(e: KeyboardEvent) {
@@ -867,6 +869,8 @@
 <div 
   class="relative w-full h-full bg-transparent flex flex-col select-none overflow-hidden" 
   bind:this={container}
+  bind:clientWidth={containerWidth}
+  bind:clientHeight={containerHeight}
   style="touch-action: none;"
   onpointerdown={handlePointerDown}
   onpointermove={handlePointerMove}
@@ -1287,13 +1291,20 @@
     <div class="w-full h-full relative pointer-events-none overflow-hidden">
       {#if clip.assetId}
         <div class="opacity-70">
-          <Waveform 
-             assetId={clip.assetId} 
-             color={clip.color} 
-             sourceOffset={clip.sourceOffset} 
-             duration={clip.duration} 
-             zoom={editor.zoom} 
-          />
+          <svelte:boundary>
+            <Waveform 
+               assetId={clip.assetId} 
+               color={clip.color} 
+               sourceOffset={clip.sourceOffset} 
+               duration={clip.duration} 
+               zoom={editor.zoom} 
+            />
+            {#snippet failed(error, reset)}
+              <div class="absolute inset-0 flex items-center justify-center text-[9px] text-amber-300 bg-amber-950/30">
+                <span>Dalga yüklenemedi</span>
+              </div>
+            {/snippet}
+          </svelte:boundary>
         </div>
       {/if}
 

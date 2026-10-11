@@ -11,7 +11,9 @@
     zoom: number; // pixels per second
   }>();
 
-  let canvasEl = $state<HTMLCanvasElement | undefined>();
+  let canvasEl = $state<HTMLCanvasElement>();
+  let canvasWidth = $state<number>(0);
+  let canvasHeight = $state<number>(0);
   let peaks = $state.raw<Float32Array | null>(null);
   let totalDuration = $state<number>(60);
 
@@ -20,8 +22,8 @@
     const ctx = canvasEl.getContext('2d');
     if (!ctx) return;
 
-    const width = canvasEl.clientWidth;
-    const height = canvasEl.clientHeight;
+    const width = canvasWidth || canvasEl.clientWidth;
+    const height = canvasHeight || canvasEl.clientHeight;
     if (width <= 0 || height <= 0) return;
 
     const dpr = Math.min(2, window.devicePixelRatio || 1);
@@ -89,28 +91,23 @@
     };
   });
 
-  // Svelte 5 Effect: Track layout resize with teardown
+  // Svelte 5 Effect: Re-render when geometry, canvas dimensions, or peaks change
   $effect(() => {
-    if (!canvasEl) return;
-    const ro = new ResizeObserver(() => {
-      renderWaveform();
-    });
-    ro.observe(canvasEl);
-    return () => {
-      ro.disconnect();
-    };
-  });
-
-  // Re-render when geometry or peaks change
-  $effect(() => {
+    const _w = canvasWidth;
+    const _h = canvasHeight;
     const _z = zoom;
     const _o = sourceOffset;
     const _d = duration;
     const _p = peaks;
-    if (canvasEl && peaks) {
+    if (canvasEl && _p && (_w > 0 || canvasEl.clientWidth > 0)) {
       renderWaveform();
     }
   });
 </script>
 
-<canvas bind:this={canvasEl} class="absolute inset-0 w-full h-full pointer-events-none opacity-50 mix-blend-plus-lighter"></canvas>
+<canvas 
+  bind:this={canvasEl} 
+  bind:clientWidth={canvasWidth}
+  bind:clientHeight={canvasHeight}
+  class="absolute inset-0 w-full h-full pointer-events-none opacity-50 mix-blend-plus-lighter"
+></canvas>
