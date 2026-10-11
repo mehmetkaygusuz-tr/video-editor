@@ -798,24 +798,13 @@
         <div class="space-y-2 mt-3">
           <div class="flex items-center justify-between">
             <label for="template-audio-select" class="block text-xs font-semibold text-neutral-300">2. Ana Müzik / Ritim</label>
-            {#if editor.assets.filter(a => a.type === 'audio').length === 0}
-              <button
-                onclick={() => {
-                  const sampleAudio = editor.ensureSampleAudioClip();
-                  if (sampleAudio.assetId) selectedTemplateAudioId = sampleAudio.assetId;
-                }}
-                class="text-[10px] text-pink-400 hover:text-pink-300 underline"
-              >
-                Örnek Müzik Ekle
-              </button>
-            {/if}
           </div>
           <select 
             id="template-audio-select"
             bind:value={selectedTemplateAudioId}
             class="w-full px-3 py-2 rounded-lg bg-neutral-950 border border-neutral-800 text-xs text-white focus:border-pink-500 focus:outline-none"
           >
-            <option value="">Ses dosyası seçin...</option>
+            <option value="">Ses veya müzik dosyası seçin...</option>
             {#each editor.assets.filter(a => a.type === 'audio' || a.type === 'video') as asset}
               <option value={asset.id}>{asset.name}</option>
             {/each}
@@ -827,19 +816,6 @@
           <div class="flex items-center justify-between text-xs font-semibold text-neutral-300">
             <span>3. Videoları Seç</span>
             <div class="flex items-center gap-2">
-              {#if editor.assets.filter(a => a.type === 'video' || a.type === 'image').length === 0}
-                <button
-                  onclick={() => {
-                    const sampleVideo = editor.ensureSampleVideoClip();
-                    if (sampleVideo.assetId && !selectedTemplateVideoIds.includes(sampleVideo.assetId)) {
-                      selectedTemplateVideoIds = [sampleVideo.assetId];
-                    }
-                  }}
-                  class="text-[10px] text-pink-400 hover:text-pink-300 underline font-normal"
-                >
-                  Örnek Video Ekle
-                </button>
-              {/if}
               <span class="text-[10px] font-normal text-neutral-500">{selectedTemplateVideoIds.length} seçili</span>
             </div>
           </div>
@@ -856,7 +832,7 @@
               </label>
             {/each}
             {#if editor.assets.filter(a => a.type === 'video' || a.type === 'image').length === 0}
-              <div class="text-xs text-neutral-500 p-2 text-center">Önce medyadan video/resim yükleyin veya örnek ekleyin.</div>
+              <div class="text-xs text-neutral-500 p-2 text-center">Önce medyadan video veya resim yükleyin.</div>
             {/if}
           </div>
         </div>
@@ -868,12 +844,17 @@
             let vIds = [...selectedTemplateVideoIds];
 
             if (!audioId) {
-              const sampleAudio = editor.ensureSampleAudioClip();
-              audioId = sampleAudio.assetId || '';
+              const audioAsset = editor.assets.find(a => a.type === 'audio');
+              if (audioAsset) audioId = audioAsset.id;
             }
             if (vIds.length === 0) {
-              const sampleVideo = editor.ensureSampleVideoClip();
-              if (sampleVideo.assetId) vIds = [sampleVideo.assetId];
+              const videoAssets = editor.assets.filter(a => a.type === 'video' || a.type === 'image');
+              vIds = videoAssets.map(a => a.id);
+            }
+
+            if (!audioId || vIds.length === 0) {
+              editor.announce('Şablon uygulamak için lütfen önce bir video ve ses dosyası yükleyin.');
+              return;
             }
 
             if (selectedTemplateId && audioId) {

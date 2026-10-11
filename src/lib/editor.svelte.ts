@@ -362,33 +362,19 @@ class VideoEditor {
   }
 
   ensureSampleVideoClip(): TimelineClip {
-    let vTrack = this.tracks.find(t => t.name === 'V1' || t.name.startsWith('V'));
-    if (!vTrack) {
-      this.addTrack('V1');
-      vTrack = this.tracks[0];
+    for (const track of this.tracks) {
+      const existing = track.clips.find(c => c.type !== 'audio' && c.type !== 'text');
+      if (existing) return existing;
     }
-    const existing = vTrack.clips.find(c => c.type !== 'audio' && c.type !== 'text');
-    if (existing) return existing;
-
-    const asset = this.addAsset('Örnek Video Klibi (1080p).mp4', 'video', null, 10);
-    this.addClip(vTrack.id, asset.name, 0, 10, '#3b82f6', asset.id, { type: 'video' });
-    const newClip = vTrack.clips[vTrack.clips.length - 1];
-    this.selectedClipId = newClip.id;
-    return newClip;
+    throw new Error('İşlem yapabilmek için lütfen önce zaman çizelgesine bir video ekleyin.');
   }
 
   ensureSampleAudioClip(): TimelineClip {
-    let aTrack = this.tracks.find(t => t.name === 'A1' || t.name.startsWith('A'));
-    if (!aTrack) {
-      this.addTrack('A1');
-      aTrack = this.tracks[this.tracks.length - 1];
+    for (const track of this.tracks) {
+      const existing = track.clips.find(c => c.type === 'audio' || c.name.toLowerCase().includes('mp3') || c.name.toLowerCase().includes('müzik'));
+      if (existing) return existing;
     }
-    const existing = aTrack.clips.find(c => c.type === 'audio' || c.name.toLowerCase().includes('mp3') || c.name.toLowerCase().includes('müzik'));
-    if (existing) return existing;
-
-    const asset = this.addAsset('Örnek Ritim Müziği (128 BPM).mp3', 'audio', null, 16);
-    this.addClip(aTrack.id, asset.name, 0, 16, '#10b981', asset.id, { type: 'audio' });
-    return aTrack.clips[aTrack.clips.length - 1];
+    throw new Error('İşlem yapabilmek için lütfen önce bir ses veya müzik dosyası ekleyin.');
   }
 
   saveState() {

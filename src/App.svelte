@@ -586,8 +586,6 @@
       editor.tracks = [];
       editor.assets = [];
       editor.playhead = 0;
-      editor.addTrack('V1');
-      editor.addTrack('A1');
       editor.saveState();
       editor.announce('Yeni boş proje oluşturuldu.');
     }
@@ -603,17 +601,12 @@
   >
     <!-- Brand / Studio Identity -->
     <div class="flex items-center gap-3">
-      <div class="flex items-center gap-2.5">
+      <div class="flex items-end gap-2">
         <button type="button" class="relative group cursor-pointer focus:outline-none" onclick={() => editor.isSettingsModalOpen = true} title="Proje Ayarları">
           <img src="logo-icon.png" alt="Logo" class="h-8 w-8 sm:h-9 sm:w-9 object-contain rounded-xl p-0.5 bg-neutral-900/90 border border-white/15 shadow-[0_0_16px_rgba(139,92,246,0.35)] transition-transform group-hover:scale-105" />
           <div class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-400 border-2 border-neutral-900 rounded-full shadow-[0_0_8px_#34d399]"></div>
         </button>
-        <div class="flex flex-col justify-center">
-          <div class="flex items-center gap-1.5">
-            <span class="hidden sm:inline-flex text-xs font-mono font-bold px-2 py-0.5 rounded-md bg-purple-500/25 text-purple-200 border border-purple-500/40 uppercase tracking-wider shadow-sm">2026 PRO</span>
-          </div>
-          <span class="text-[9px] font-mono text-neutral-400 hidden xs:inline tracking-tight">Yerel WebGPU Stüdyo</span>
-        </div>
+        <span class="hidden sm:inline-flex text-[9px] font-mono px-1.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 font-bold uppercase tracking-wider mb-0.5 leading-none">2026 PRO</span>
       </div>
 
       <!-- Quick Action: Project Reset -->
@@ -781,13 +774,8 @@
     <!-- Top Row: Monitor + Right Inspector/Panel (Desktop) -->
     <div class="flex-1 flex min-h-0 overflow-hidden lg:gap-2">
       
-      <!-- Center Pane: Viewer / Cinema Stage 2026 -->
-      <section class="flex-1 relative flex flex-col items-center justify-center spatial-glass lg:rounded-2xl p-4 min-h-0 overflow-hidden cinema-stage-glow transition-all">
-        
-        <!-- Ambient Diffused Glow (DaVinci / Apple Spatial Cinema Glow) -->
-        <div class="absolute inset-0 flex items-center justify-center pointer-events-none -z-0 overflow-hidden">
-          <div class="w-4/5 h-4/5 rounded-full bg-gradient-to-tr from-purple-600/10 via-cyan-500/10 to-indigo-600/10 blur-3xl opacity-40 animate-pulse transition-all duration-1000"></div>
-        </div>
+      <!-- Center Pane: Professional Reference Cinema Monitor Stage -->
+      <section class="flex-1 relative flex flex-col items-center justify-center bg-[#090a0f] border border-white/5 lg:rounded-2xl p-4 min-h-0 overflow-hidden transition-all">
 
         <!-- Ambient Top Cinema HUD Pill -->
         <div class="absolute top-3 inset-x-0 flex items-center justify-between px-6 {isFullscreen ? 'fixed z-[60]' : 'z-20'} pointer-events-none">
@@ -1089,13 +1077,13 @@
     <!-- Minimized Transport Control Bar (Pinned Directly Above Timeline) -->
     <div class="flex-none px-3 sm:px-4 py-1.5 grid grid-cols-3 items-center spatial-glass lg:rounded-xl border-t lg:border border-white/10 z-20 transition-all select-none shadow-lg">
       <!-- Left: Razor Cut & Magnet Snapping & Beat Snapping -->
-      <div class="hidden lg:flex items-center gap-1.5 justify-self-start">
+      <div class="flex items-center gap-1.5 justify-self-start">
         <button
           onclick={() => { editor.splitClipAtPlayhead(); editor.triggerHaptic('medium'); }}
           class="px-2 py-1 rounded-lg bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/30 text-sky-300 text-xs font-semibold flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
           title="Klibi İğne Konumundan Böl (C / Blade All)"
         >
-          <Scissors size={13} />
+          <Scissors size={15} />
           <span class="hidden sm:inline">Böl</span>
         </button>
 
