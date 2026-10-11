@@ -152,13 +152,13 @@
 
   <!-- 3. Main Horizontal Thumb-Zone Strip -->
   <div 
-    class="w-full max-w-3xl flex items-center justify-between px-2 sm:px-4 py-1.5 overflow-hidden relative"
+    class="w-full flex items-center justify-between px-1.5 sm:px-3 py-1.5 overflow-hidden relative"
   >
     {#if selectedClip && editor.mobileWorkspace === 'timeline'}
       <!-- MODE A: CLIP SELECTED ACTIONS (Contextual Editing) -->
       <div 
         bind:this={scrollContainerRef}
-        class="flex-1 flex items-center gap-1 overflow-x-auto scroll-smooth w-full px-1 py-0.5 no-scrollbar [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] touch-pan-x"
+        class="flex-1 flex items-center gap-1.5 overflow-x-auto scroll-smooth w-full px-1 py-0.5 no-scrollbar touch-pan-x [-webkit-overflow-scrolling:touch]"
       >
         <!-- 1. Deselect button -->
         <button 
@@ -327,13 +327,12 @@
     {:else}
       <!-- MODE B: GLOBAL PRODUCTION DOCK (No Clip Selected) -->
       <div 
-        bind:this={scrollContainerRef}
-        class="flex-1 flex items-center gap-1.5 overflow-x-auto scroll-smooth w-full px-1 py-0.5 no-scrollbar [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] touch-pan-x"
+        class="flex-1 grid grid-cols-3 gap-2 w-full px-2 py-0.5"
       >
         <!-- 1. Kurgu / Timeline -->
         <button 
           onclick={() => { editor.mobileWorkspace = 'timeline'; editor.selectClip(null); editor.triggerHaptic('light'); }}
-          class="relative flex flex-col items-center justify-center min-w-[58px] h-12 rounded-xl transition-all active:scale-95 flex-none {editor.mobileWorkspace === 'timeline' ? 'text-white bg-white/10 font-bold' : 'text-neutral-400 hover:text-white hover:bg-white/5'}"
+          class="relative flex flex-col items-center justify-center h-12 rounded-xl transition-all active:scale-95 {editor.mobileWorkspace === 'timeline' ? 'text-white bg-white/10 font-bold' : 'text-neutral-400 hover:text-white hover:bg-white/5'}"
           title="Zaman Çizelgesine Dön"
         >
           <Layers size={18} class={editor.mobileWorkspace === 'timeline' ? 'text-sky-400' : ''} />
@@ -343,23 +342,10 @@
           {/if}
         </button>
 
-        <!-- 2. Medya Havuzu -->
-        <button 
-          onclick={() => { editor.mobileWorkspace = 'media'; editor.activeSidebarTab = 'media'; editor.triggerHaptic('light'); }}
-          class="relative flex flex-col items-center justify-center min-w-[58px] h-12 rounded-xl transition-all active:scale-95 flex-none {editor.mobileWorkspace === 'media' ? 'text-white bg-blue-500/15 border border-blue-500/25 font-bold' : 'text-neutral-400 hover:text-white hover:bg-white/5'}"
-          title="Medya Ekle / Yönet"
-        >
-          <FolderClosed size={18} class={editor.mobileWorkspace === 'media' ? 'text-blue-400' : ''} />
-          <span class="text-[10px] mt-1 font-medium">Medya</span>
-          {#if editor.mobileWorkspace === 'media'}
-            <div class="absolute bottom-1 w-3 h-0.5 bg-blue-400 rounded-full shadow-[0_0_6px_#60a5fa]"></div>
-          {/if}
-        </button>
-
-        <!-- 3. AI Sihirbazı / Üretim Merkezi -->
+        <!-- 2. AI Sihirbazı / Üretim Merkezi -->
         <button 
           onclick={() => { editor.mobileWorkspace = 'ai'; editor.activeSidebarTab = 'ai'; editor.triggerHaptic('medium'); }}
-          class="relative flex flex-col items-center justify-center min-w-[64px] h-12 rounded-xl transition-all active:scale-95 flex-none {editor.mobileWorkspace === 'ai' ? 'text-white bg-purple-500/20 border border-purple-500/35 font-bold shadow-[0_0_12px_rgba(168,85,247,0.3)]' : 'text-purple-300 hover:text-white hover:bg-purple-500/10'}"
+          class="relative flex flex-col items-center justify-center h-12 rounded-xl transition-all active:scale-95 {editor.mobileWorkspace === 'ai' ? 'text-white bg-purple-500/20 border border-purple-500/35 font-bold shadow-[0_0_12px_rgba(168,85,247,0.3)]' : 'text-purple-300 hover:text-white hover:bg-purple-500/10'}"
           title="Yapay Zeka Araçları (WebGPU)"
         >
           <Sparkles size={18} class="text-purple-400" />
@@ -369,10 +355,10 @@
           {/if}
         </button>
 
-        <!-- 4. Sinematik Renk Filtreleri (Oklab LUT) -->
+        <!-- 3. Sinematik Renk Filtreleri (Oklab LUT) -->
         <button 
           onclick={() => { editor.mobileWorkspace = 'filters'; editor.triggerHaptic('light'); }}
-          class="relative flex flex-col items-center justify-center min-w-[58px] h-12 rounded-xl transition-all active:scale-95 flex-none {editor.mobileWorkspace === 'filters' ? 'text-white bg-cyan-500/15 border border-cyan-500/25 font-bold' : 'text-neutral-400 hover:text-white hover:bg-white/5'}"
+          class="relative flex flex-col items-center justify-center h-12 rounded-xl transition-all active:scale-95 {editor.mobileWorkspace === 'filters' ? 'text-white bg-cyan-500/15 border border-cyan-500/25 font-bold' : 'text-neutral-400 hover:text-white hover:bg-white/5'}"
           title="Renk Filtreleri & LUT Kütüphanesi"
         >
           <Palette size={18} class="text-cyan-400" />
@@ -380,42 +366,6 @@
           {#if editor.mobileWorkspace === 'filters'}
             <div class="absolute bottom-1 w-3 h-0.5 bg-cyan-400 rounded-full shadow-[0_0_6px_#22d3ee]"></div>
           {/if}
-        </button>
-
-        <!-- 5. Altyazı & Metin -->
-        <button 
-          onclick={() => { editor.mobileWorkspace = 'captions'; editor.activeSidebarTab = 'captions'; editor.triggerHaptic('light'); }}
-          class="relative flex flex-col items-center justify-center min-w-[58px] h-12 rounded-xl transition-all active:scale-95 flex-none {editor.mobileWorkspace === 'captions' ? 'text-white bg-amber-500/15 border border-amber-500/25 font-bold' : 'text-neutral-400 hover:text-white hover:bg-white/5'}"
-          title="Otomatik Altyazı & Seslendirme"
-        >
-          <Type size={18} class={editor.mobileWorkspace === 'captions' ? 'text-amber-400' : ''} />
-          <span class="text-[10px] mt-1 font-medium">Altyazı</span>
-          {#if editor.mobileWorkspace === 'captions'}
-            <div class="absolute bottom-1 w-3 h-0.5 bg-amber-400 rounded-full shadow-[0_0_6px_#fbbf24]"></div>
-          {/if}
-        </button>
-
-        <!-- 6. Kurgu Şablonları -->
-        <button 
-          onclick={() => { editor.mobileWorkspace = 'templates'; editor.activeSidebarTab = 'templates'; editor.triggerHaptic('light'); }}
-          class="relative flex flex-col items-center justify-center min-w-[60px] h-12 rounded-xl transition-all active:scale-95 flex-none {editor.mobileWorkspace === 'templates' ? 'text-white bg-pink-500/15 border border-pink-500/25 font-bold' : 'text-neutral-400 hover:text-white hover:bg-white/5'}"
-          title="Sihirli Kurgu Şablonları (TikTok, Beats, Sinematik)"
-        >
-          <Zap size={18} class={editor.mobileWorkspace === 'templates' ? 'text-pink-400' : ''} />
-          <span class="text-[10px] mt-1 font-medium">Şablonlar</span>
-          {#if editor.mobileWorkspace === 'templates'}
-            <div class="absolute bottom-1 w-3 h-0.5 bg-pink-400 rounded-full shadow-[0_0_6px_#f472b6]"></div>
-          {/if}
-        </button>
-
-        <!-- 7. Ayarlar -->
-        <button 
-          onclick={() => { editor.isSettingsModalOpen = true; editor.triggerHaptic('light'); }}
-          class="relative flex flex-col items-center justify-center min-w-[56px] h-12 rounded-xl text-neutral-400 hover:text-white hover:bg-white/5 transition-all active:scale-95 ml-auto flex-none cursor-pointer"
-          title="Proje ve Donanım Ayarları"
-        >
-          <SlidersHorizontal size={18} class="text-emerald-400" />
-          <span class="text-[10px] mt-1 font-medium">Ayarlar</span>
         </button>
       </div>
     {/if}

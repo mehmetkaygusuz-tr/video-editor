@@ -4,7 +4,7 @@
   import type { TimelineClip } from './lib/types';
   import { updateAudioEngine, ensureAudioUnlocked } from './lib/audio';
   import { masterAudioClock } from './lib/engine/audioClock';
-  import { getFileFromOPFS } from './lib/opfs';
+  import { getFileFromOPFS, saveFileToOPFS } from './lib/opfs';
   import { engine } from './lib/engine/orchestrator.svelte';
   import { engineState } from './lib/engine/engineState.svelte';
   import { aiService } from './lib/engine/aiService.svelte';
@@ -27,34 +27,31 @@
     Trash as Trash2, X, Undo2, Redo2, FastForward, Volume2, Layers, Crop, FolderClosed,
     SlidersHorizontal as Sliders, Monitor, CircleQuestionMark as HelpCircle, RefreshCw,
     Maximize2, Minimize2, Type, Zap, RotateCcw, Magnet, ZoomIn, ZoomOut, Music,
-    ChevronDown, ChevronUp, ChevronLeft, ChevronRight
+    ChevronDown, ChevronUp, ChevronLeft, ChevronRight, Square, Check, Upload
   } from '@lucide/svelte';
 
   let canvasRef = $state<HTMLCanvasElement | undefined>();
+  let isAspectRatioDropdownOpen = $state(false);
 
   let timelineHeightClass = $derived.by(() => {
     if (editor.isTimelineCollapsed) {
       return 'h-0 min-h-0 border-t-0 lg:border-none opacity-0';
     }
-    if (editor.mobileWorkspace === 'filters') {
+    // Mobile docked panels: Filters, Media, AI, Templates, Captions
+    if (editor.mobileWorkspace !== 'timeline') {
       return editor.isBottomPanelExpanded
-        ? 'h-[48vh] lg:h-[42vh] min-h-[310px] opacity-100 flex flex-col'
-        : 'h-[32vh] lg:h-[28vh] min-h-[190px] opacity-100 flex flex-col';
+        ? 'h-[50vh] lg:h-[45vh] min-h-[320px] opacity-100 flex flex-col'
+        : 'h-[34vh] lg:h-[30vh] min-h-[220px] opacity-100 flex flex-col';
+    }
+    // Timeline mode: on mobile, provide stable generous room (expandable when filled), on desktop adapt to tracks
+    if (editor.isBottomPanelExpanded) {
+      return 'h-[46vh] lg:h-[36vh] min-h-[280px] opacity-100 flex flex-col';
     }
     const count = editor.tracks.length;
-    if (count === 0) {
-      return 'h-[125px] min-h-[125px] opacity-100 flex flex-col';
+    if (count > 3) {
+      return 'h-[32vh] lg:h-[30vh] min-h-[240px] max-h-[38vh] opacity-100 flex flex-col';
     }
-    if (count === 1) {
-      return 'h-[140px] min-h-[140px] opacity-100 flex flex-col';
-    }
-    if (count === 2) {
-      return 'h-[185px] min-h-[185px] opacity-100 flex flex-col';
-    }
-    if (count === 3) {
-      return 'h-[235px] min-h-[235px] opacity-100 flex flex-col';
-    }
-    return 'h-[280px] lg:h-[30vh] min-h-[240px] max-h-[35vh] opacity-100 flex flex-col';
+    return 'h-[26vh] lg:h-[22vh] min-h-[180px] opacity-100 flex flex-col';
   });
 
   let selectedClip = $derived(editor.getSelectedClip());
@@ -215,6 +212,20 @@
     if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y') {
       e.preventDefault();
       editor.redo();
+      return;
+    }
+
+    // Arrow Left / Right: Exact 1 SMPTE frame step (SMPTE Standard)
+    if (e.key === 'ArrowLeft') {
+      e.preventDefault();
+      editor.stepFrame(-1);
+      editor.triggerHaptic('light');
+      return;
+    }
+    if (e.key === 'ArrowRight') {
+      e.preventDefault();
+      editor.stepFrame(1);
+      editor.triggerHaptic('light');
       return;
     }
 
@@ -485,10 +496,54 @@
       } else if (editor.aspectRatio === '1:1') {
         w = 1080;
         h = 1080;
+      } else if (editor.aspectRatio === '21:9') {
+        w = 2560;
+        h = 1080;
       }
       engine.resizeCanvas(w, h);
     }
   });
+
+  let headerFileInputRef = $state<HTMLInputElement | undefined>();
+
+  async function handleMediaUpload(event: Event) {
+    const target = event.target as HTMLInputElement;
+    if (!target.files || target.files.length === 0) return;
+
+    for (let i = 0; i < target.files.length; i++) {
+      const file = target.files[i];
+      let type: 'video' | 'audio' | 'image' = 'video';
+      if (file.type.startsWith('audio/')) type = 'audio';
+      if (file.type.startsWith('image/')) type = 'image';
+
+      try {
+        const handle = await saveFileToOPFS(file, file.name);
+        const blobUrl = URL.createObjectURL(file);
+        let duration: number | undefined = undefined;
+        if (type === 'video' || type === 'audio') {
+          try {
+            const mediaEl = document.createElement(type === 'video' ? 'video' : 'audio');
+            mediaEl.preload = 'metadata';
+            mediaEl.src = blobUrl;
+            await new Promise((res) => {
+              mediaEl.onloadedmetadata = () => {
+                if (Number.isFinite(mediaEl.duration)) {
+                  duration = mediaEl.duration;
+                }
+                res(null);
+              };
+              mediaEl.onerror = () => res(null);
+            });
+          } catch (_) {}
+        }
+        editor.addAsset(file.name, type, handle, duration, blobUrl);
+        editor.announce(`Medya yüklendi: ${file.name}`);
+      } catch (err) {
+        console.error("Failed to import asset:", err);
+      }
+    }
+    target.value = '';
+  }
 
   function resetProject() {
     if (confirm('Projeyi sıfırlamak ve tüm medyaları temizlemek istediğinize emin misiniz?')) {
@@ -522,7 +577,7 @@
         </button>
         <div class="flex flex-col">
           <div class="flex items-center gap-1.5">
-            <span class="text-[9px] font-mono px-1.5 py-0.2 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 font-bold uppercase tracking-wider">2026 PRO</span>
+            <span class="hidden sm:inline-flex text-[9px] font-mono px-1.5 py-0.2 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 font-bold uppercase tracking-wider">2026 PRO</span>
           </div>
           <span class="text-[9px] font-mono text-neutral-400 hidden xs:inline tracking-tight">Yerel WebGPU Stüdyo</span>
         </div>
@@ -581,11 +636,11 @@
     <!-- Right Actions: Undo/Redo + Mode Toggles + Export -->
     <div class="flex items-center gap-2 sm:gap-2.5">
       <!-- Undo / Redo Glass Pill -->
-      <div class="flex items-center spatial-glass rounded-xl p-0.5">
+      <div class="flex items-center spatial-glass rounded-xl p-0.5 h-9">
         <button
           onclick={() => editor.undo()}
           disabled={!editor.canUndo}
-          class="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-white/10 hover:text-white disabled:opacity-20 text-neutral-400 transition-colors"
+          class="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-white/10 hover:text-white disabled:opacity-20 text-neutral-400 transition-colors cursor-pointer"
           title="Geri Al (Ctrl+Z)"
         >
           <Undo2 size={13} />
@@ -594,18 +649,38 @@
         <button
           onclick={() => editor.redo()}
           disabled={!editor.canRedo}
-          class="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-white/10 hover:text-white disabled:opacity-20 text-neutral-400 transition-colors"
+          class="w-7 h-7 rounded-lg flex items-center justify-center hover:bg-white/10 hover:text-white disabled:opacity-20 text-neutral-400 transition-colors cursor-pointer"
           title="Yinele (Ctrl+Y)"
         >
           <Redo2 size={13} />
         </button>
       </div>
 
+      <!-- Hidden file input for direct media upload from header -->
+      <input 
+        type="file" 
+        multiple 
+        accept="video/*,audio/*,image/*" 
+        class="hidden" 
+        bind:this={headerFileInputRef} 
+        onchange={handleMediaUpload} 
+      />
+
+      <!-- Medya Yükle Button (Visible on Mobile & Desktop - Clear Upload Icon) -->
+      <button
+        onclick={() => headerFileInputRef?.click()}
+        class="flex items-center gap-1.5 px-2.5 sm:px-3 h-9 rounded-xl bg-sky-500/15 hover:bg-sky-500/25 text-sky-300 border border-sky-500/30 text-xs font-semibold active:scale-95 transition-all cursor-pointer shadow-sm"
+        title="Medya Yükle (Video, Ses, Resim Dosyası Seç)"
+      >
+        <Upload size={14} class="text-sky-400" />
+        <span class="text-xs font-semibold">Medya</span>
+      </button>
+
       <!-- Desktop Production Pipeline Toggles (Fluid Glass Pill) -->
-      <div class="hidden lg:flex items-center spatial-glass rounded-xl p-1 gap-1">
+      <div class="hidden lg:flex items-center spatial-glass rounded-xl p-0.5 gap-1 h-9">
         <button 
           onclick={() => { editor.activeSidebarTab = 'media'; appState.isInspectorOpen = true; }}
-          class="px-2.5 py-1.5 rounded-lg text-xs transition-all flex items-center gap-1.5 {editor.activeSidebarTab === 'media' && appState.isInspectorOpen ? 'bg-sky-500/20 text-sky-300 font-semibold border border-sky-500/30 shadow-[0_0_12px_rgba(56,189,248,0.25)]' : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'}"
+          class="px-2.5 h-7 rounded-lg text-xs transition-all flex items-center gap-1.5 cursor-pointer {editor.activeSidebarTab === 'media' && appState.isInspectorOpen ? 'bg-sky-500/20 text-sky-300 font-semibold border border-sky-500/30 shadow-[0_0_12px_rgba(56,189,248,0.25)]' : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'}"
           title="1. Aşama: Medya Dosyaları ve Varlıklar"
         >
           <FolderClosed size={13} />
@@ -613,7 +688,7 @@
         </button>
         <button 
           onclick={() => { editor.activeSidebarTab = 'ai'; appState.isInspectorOpen = true; }}
-          class="px-2.5 py-1.5 rounded-lg text-xs transition-all flex items-center gap-1.5 {editor.activeSidebarTab === 'ai' && appState.isInspectorOpen ? 'bg-purple-500/20 text-purple-300 font-semibold border border-purple-500/30 shadow-[0_0_12px_rgba(168,85,247,0.25)]' : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'}"
+          class="px-2.5 h-7 rounded-lg text-xs transition-all flex items-center gap-1.5 cursor-pointer {editor.activeSidebarTab === 'ai' && appState.isInspectorOpen ? 'bg-purple-500/20 text-purple-300 font-semibold border border-purple-500/30 shadow-[0_0_12px_rgba(168,85,247,0.25)]' : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'}"
           title="2. Aşama: Otonom AI Araçları (Sessizlik, Arka Plan, Reframe)"
         >
           <Sparkles size={13} />
@@ -621,7 +696,7 @@
         </button>
         <button 
           onclick={() => { editor.activeSidebarTab = 'templates'; appState.isInspectorOpen = true; }}
-          class="px-2.5 py-1.5 rounded-lg text-xs transition-all flex items-center gap-1.5 {editor.activeSidebarTab === 'templates' && appState.isInspectorOpen ? 'bg-pink-500/20 text-pink-300 font-semibold border border-pink-500/30 shadow-[0_0_12px_rgba(244,114,182,0.25)]' : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'}"
+          class="px-2.5 h-7 rounded-lg text-xs transition-all flex items-center gap-1.5 cursor-pointer {editor.activeSidebarTab === 'templates' && appState.isInspectorOpen ? 'bg-pink-500/20 text-pink-300 font-semibold border border-pink-500/30 shadow-[0_0_12px_rgba(244,114,182,0.25)]' : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'}"
           title="3. Aşama: Ritmik Şablonlar & Viral Kancalar"
         >
           <Zap size={13} />
@@ -629,7 +704,7 @@
         </button>
         <button 
           onclick={() => { editor.activeSidebarTab = 'filters'; appState.isInspectorOpen = true; }}
-          class="px-2.5 py-1.5 rounded-lg text-xs transition-all flex items-center gap-1.5 {editor.activeSidebarTab === 'filters' && appState.isInspectorOpen ? 'bg-cyan-500/20 text-cyan-300 font-semibold border border-cyan-500/30 shadow-[0_0_12px_rgba(6,182,212,0.25)]' : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'}"
+          class="px-2.5 h-7 rounded-lg text-xs transition-all flex items-center gap-1.5 cursor-pointer {editor.activeSidebarTab === 'filters' && appState.isInspectorOpen ? 'bg-cyan-500/20 text-cyan-300 font-semibold border border-cyan-500/30 shadow-[0_0_12px_rgba(6,182,212,0.25)]' : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'}"
           title="4. Aşama: Oklab Sinematik Renk Filtreleri"
         >
           <Sliders size={13} />
@@ -637,7 +712,7 @@
         </button>
         <button 
           onclick={() => { editor.activeSidebarTab = 'captions'; appState.isInspectorOpen = true; }}
-          class="px-2.5 py-1.5 rounded-lg text-xs transition-all flex items-center gap-1.5 {editor.activeSidebarTab === 'captions' && appState.isInspectorOpen ? 'bg-amber-500/20 text-amber-300 font-semibold border border-amber-500/30 shadow-[0_0_12px_rgba(245,158,11,0.25)]' : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'}"
+          class="px-2.5 h-7 rounded-lg text-xs transition-all flex items-center gap-1.5 cursor-pointer {editor.activeSidebarTab === 'captions' && appState.isInspectorOpen ? 'bg-amber-500/20 text-amber-300 font-semibold border border-amber-500/30 shadow-[0_0_12px_rgba(245,158,11,0.25)]' : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'}"
           title="5. Aşama: Dinamik Altyazı & Kokoro Seslendirme"
         >
           <Type size={13} />
@@ -648,7 +723,7 @@
 
         <button 
           onclick={() => { appState.isInspectorOpen = !appState.isInspectorOpen; }}
-          class="p-1.5 rounded-lg text-xs transition-colors flex items-center text-neutral-400 hover:text-white hover:bg-white/10"
+          class="w-7 h-7 rounded-lg text-xs transition-colors flex items-center justify-center text-neutral-400 hover:text-white hover:bg-white/10 cursor-pointer"
           title={appState.isInspectorOpen ? "Yan Paneli Kapat" : "Yan Paneli Aç"}
         >
           <X size={13} class={appState.isInspectorOpen ? '' : 'rotate-45'} />
@@ -658,21 +733,21 @@
       <!-- Settings Icon Pill -->
       <button
         onclick={() => editor.isSettingsModalOpen = true}
-        class="spatial-glass hover:bg-white/10 text-neutral-300 hover:text-white p-2 sm:px-2.5 sm:py-2 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 text-xs"
+        class="spatial-glass hover:bg-white/10 text-neutral-300 hover:text-white h-9 px-2.5 sm:px-3 rounded-xl transition-all cursor-pointer flex items-center gap-1.5 text-xs font-medium"
         title="Donanım ve Proje Ayarları"
       >
         <Sliders size={14} class="text-neutral-400" />
-        <span class="hidden 2xl:inline font-medium">Ayarlar</span>
+        <span class="hidden 2xl:inline">Ayarlar</span>
       </button>
 
       <!-- Neon 4K Export Button -->
       <button 
         onclick={() => editor.isExportOpen = true}
-        class="neon-btn-export text-white px-3.5 sm:px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 cursor-pointer shadow-lg"
+        class="neon-btn-export text-white h-9 px-3.5 sm:px-4 rounded-xl text-xs font-semibold flex items-center gap-2 cursor-pointer shadow-lg active:scale-95 transition-all"
       >
         <Download size={14} />
         <span>Dışa Aktar</span>
-        <span class="hidden sm:inline text-[9px] font-mono bg-white/20 px-1 py-0.2 rounded font-bold">4K</span>
+        <span class="hidden sm:inline text-[9px] font-mono bg-white/20 px-1 py-0.5 rounded font-bold">4K</span>
       </button>
     </div>
   </header>
@@ -686,35 +761,142 @@
       <!-- Center Pane: Viewer / Cinema Stage 2026 -->
       <section class="flex-1 relative flex flex-col items-center justify-center spatial-glass lg:rounded-2xl p-4 min-h-0 overflow-hidden cinema-stage-glow transition-all">
         
+        <!-- Ambient Diffused Glow (DaVinci / Apple Spatial Cinema Glow) -->
+        <div class="absolute inset-0 flex items-center justify-center pointer-events-none -z-0 overflow-hidden">
+          <div class="w-4/5 h-4/5 rounded-full bg-gradient-to-tr from-purple-600/10 via-cyan-500/10 to-indigo-600/10 blur-3xl opacity-40 animate-pulse transition-all duration-1000"></div>
+        </div>
+
         <!-- Ambient Top Cinema HUD Pill -->
         <div class="absolute top-3 inset-x-0 flex items-center justify-between px-6 {isFullscreen ? 'fixed z-[60]' : 'z-20'} pointer-events-none">
-          <!-- Aspect ratio selector with modern glass design -->
-          <div class="flex items-center gap-1 spatial-glass p-1 rounded-xl pointer-events-auto shadow-xl">
+          <!-- Aspect ratio selector: Mobile single-box dropdown + Desktop modern vector icon pill -->
+          <!-- Desktop Bar (sm:flex) -->
+          <div class="hidden sm:flex items-center gap-1 spatial-glass p-1 rounded-xl pointer-events-auto shadow-xl">
             <button
               onclick={() => editor.aspectRatio = 'original'}
-              class="px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all cursor-pointer {editor.aspectRatio === 'original' ? 'bg-white/20 text-white font-bold shadow-sm' : 'text-neutral-400 hover:text-neutral-200'}"
+              class="px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all cursor-pointer flex items-center gap-1.5 {editor.aspectRatio === 'original' ? 'bg-white/20 text-white font-bold shadow-sm' : 'text-neutral-400 hover:text-neutral-200'}"
               title="Videonun Orijinal En-Boy Oranı"
             >
-              📐 Orijinal
+              <div class="w-3.5 h-3.5 border border-current border-dashed rounded-xs opacity-80"></div>
+              <span>Orijinal</span>
             </button>
             <button
               onclick={() => editor.aspectRatio = '16:9'}
-              class="px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all cursor-pointer {editor.aspectRatio === '16:9' ? 'bg-white/20 text-white font-bold shadow-sm' : 'text-neutral-400 hover:text-neutral-200'}"
+              class="px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all cursor-pointer flex items-center gap-1.5 {editor.aspectRatio === '16:9' ? 'bg-white/20 text-white font-bold shadow-sm' : 'text-neutral-400 hover:text-neutral-200'}"
+              title="Yatay 16:9 (YouTube / Masaüstü)"
             >
-              🖥️ 16:9
+              <div class="w-4 h-2.5 border border-current rounded-xs"></div>
+              <span>16:9</span>
             </button>
             <button
               onclick={() => editor.aspectRatio = '9:16'}
-              class="px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all cursor-pointer {editor.aspectRatio === '9:16' ? 'bg-purple-600/80 text-white font-bold shadow-[0_0_12px_rgba(168,85,247,0.4)]' : 'text-neutral-400 hover:text-neutral-200'}"
+              class="px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all cursor-pointer flex items-center gap-1.5 {editor.aspectRatio === '9:16' ? 'bg-purple-600/80 text-white font-bold shadow-[0_0_12px_rgba(168,85,247,0.4)]' : 'text-neutral-400 hover:text-neutral-200'}"
+              title="Dikey 9:16 (TikTok / Reels / Shorts)"
             >
-              📱 9:16
+              <div class="w-2.5 h-4 border border-current rounded-xs"></div>
+              <span>9:16</span>
             </button>
             <button
               onclick={() => editor.aspectRatio = '1:1'}
-              class="px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all cursor-pointer {editor.aspectRatio === '1:1' ? 'bg-white/20 text-white font-bold shadow-sm' : 'text-neutral-400 hover:text-neutral-200'}"
+              class="px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all cursor-pointer flex items-center gap-1.5 {editor.aspectRatio === '1:1' ? 'bg-white/20 text-white font-bold shadow-sm' : 'text-neutral-400 hover:text-neutral-200'}"
+              title="Kare 1:1 (Instagram Gönderisi)"
             >
-              ⏹️ 1:1
+              <div class="w-3 h-3 border border-current rounded-xs"></div>
+              <span>1:1</span>
             </button>
+            <button
+              onclick={() => editor.aspectRatio = '21:9'}
+              class="px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all cursor-pointer flex items-center gap-1.5 {editor.aspectRatio === '21:9' ? 'bg-indigo-600/80 text-white font-bold shadow-[0_0_12px_rgba(99,102,241,0.4)]' : 'text-neutral-400 hover:text-neutral-200'}"
+              title="Sinematik Ultra-Geniş (21:9)"
+            >
+              <div class="w-4.5 h-2 border border-current rounded-xs"></div>
+              <span>21:9</span>
+            </button>
+          </div>
+
+          <!-- Mobile Single-Box Dropdown (sm:hidden) -->
+          <div class="relative sm:hidden pointer-events-auto">
+            <button
+              onclick={() => isAspectRatioDropdownOpen = !isAspectRatioDropdownOpen}
+              class="flex items-center gap-1.5 spatial-glass px-2.5 py-1.5 rounded-xl text-[11px] font-semibold text-neutral-200 border border-white/15 shadow-xl active:scale-95 transition-all cursor-pointer"
+              title="En-Boy Oranı Değiştir"
+            >
+              {#if editor.aspectRatio === '16:9'}
+                <div class="w-3.5 h-2 border border-current rounded-xs"></div>
+                <span>16:9</span>
+              {:else if editor.aspectRatio === '9:16'}
+                <div class="w-2 h-3.5 border border-purple-400 rounded-xs"></div>
+                <span class="text-purple-300 font-bold">9:16</span>
+              {:else if editor.aspectRatio === '1:1'}
+                <div class="w-2.5 h-2.5 border border-current rounded-xs"></div>
+                <span>1:1</span>
+              {:else if editor.aspectRatio === '21:9'}
+                <div class="w-4 h-1.5 border border-indigo-400 rounded-xs"></div>
+                <span class="text-indigo-300">21:9</span>
+              {:else}
+                <div class="w-3 h-3 border border-current border-dashed rounded-xs opacity-80"></div>
+                <span>Orijinal</span>
+              {/if}
+              <ChevronDown size={12} class="text-neutral-400 transition-transform {isAspectRatioDropdownOpen ? 'rotate-180' : ''}" />
+            </button>
+
+            {#if isAspectRatioDropdownOpen}
+              <!-- Dropdown Menu Popover -->
+              <!-- svelte-ignore a11y_click_events_have_key_events -->
+              <div 
+                class="absolute left-0 top-full mt-1.5 w-36 spatial-glass border border-white/15 rounded-xl p-1 shadow-2xl z-50 flex flex-col gap-0.5 animate-in fade-in slide-in-from-top-1 duration-150 backdrop-blur-xl bg-neutral-950/90"
+              >
+                <button
+                  onclick={() => { editor.aspectRatio = 'original'; isAspectRatioDropdownOpen = false; editor.triggerHaptic('light'); }}
+                  class="flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer {editor.aspectRatio === 'original' ? 'bg-white/15 text-white font-bold' : 'text-neutral-300 hover:bg-white/5'}"
+                >
+                  <div class="flex items-center gap-2">
+                    <div class="w-3.5 h-3.5 border border-current border-dashed rounded-xs opacity-75"></div>
+                    <span>Orijinal</span>
+                  </div>
+                  {#if editor.aspectRatio === 'original'}<Check size={12} class="text-cyan-400" />{/if}
+                </button>
+                <button
+                  onclick={() => { editor.aspectRatio = '16:9'; isAspectRatioDropdownOpen = false; editor.triggerHaptic('light'); }}
+                  class="flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer {editor.aspectRatio === '16:9' ? 'bg-white/15 text-white font-bold' : 'text-neutral-300 hover:bg-white/5'}"
+                >
+                  <div class="flex items-center gap-2">
+                    <div class="w-3.5 h-2 border border-current rounded-xs"></div>
+                    <span>16:9 Yatay</span>
+                  </div>
+                  {#if editor.aspectRatio === '16:9'}<Check size={12} class="text-cyan-400" />{/if}
+                </button>
+                <button
+                  onclick={() => { editor.aspectRatio = '9:16'; isAspectRatioDropdownOpen = false; editor.triggerHaptic('light'); }}
+                  class="flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer {editor.aspectRatio === '9:16' ? 'bg-purple-600/30 text-purple-200 font-bold border border-purple-500/30' : 'text-neutral-300 hover:bg-white/5'}"
+                >
+                  <div class="flex items-center gap-2">
+                    <div class="w-2 h-3.5 border border-purple-400 rounded-xs"></div>
+                    <span>9:16 Dikey</span>
+                  </div>
+                  {#if editor.aspectRatio === '9:16'}<Check size={12} class="text-purple-400" />{/if}
+                </button>
+                <button
+                  onclick={() => { editor.aspectRatio = '1:1'; isAspectRatioDropdownOpen = false; editor.triggerHaptic('light'); }}
+                  class="flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer {editor.aspectRatio === '1:1' ? 'bg-white/15 text-white font-bold' : 'text-neutral-300 hover:bg-white/5'}"
+                >
+                  <div class="flex items-center gap-2">
+                    <div class="w-2.5 h-2.5 border border-current rounded-xs"></div>
+                    <span>1:1 Kare</span>
+                  </div>
+                  {#if editor.aspectRatio === '1:1'}<Check size={12} class="text-cyan-400" />{/if}
+                </button>
+                <button
+                  onclick={() => { editor.aspectRatio = '21:9'; isAspectRatioDropdownOpen = false; editor.triggerHaptic('light'); }}
+                  class="flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer {editor.aspectRatio === '21:9' ? 'bg-indigo-600/30 text-indigo-200 font-bold border border-indigo-500/30' : 'text-neutral-300 hover:bg-white/5'}"
+                >
+                  <div class="flex items-center gap-2">
+                    <div class="w-4 h-1.5 border border-indigo-400 rounded-xs"></div>
+                    <span>21:9 Sinema</span>
+                  </div>
+                  {#if editor.aspectRatio === '21:9'}<Check size={12} class="text-indigo-400" />{/if}
+                </button>
+              </div>
+            {/if}
           </div>
 
           <!-- Video Engine Status + Timecode + Fullscreen -->
@@ -755,7 +937,7 @@
           onpointermove={handleMonitorPointerMove}
           onpointerup={handleMonitorPointerUp}
           onpointercancel={handleMonitorPointerUp}
-          class="relative w-full cursor-pointer select-none touch-none flex items-center justify-center transition-all duration-300 border border-white/10 shadow-2xl overflow-hidden bg-neutral-950 rounded-2xl {isFullscreen ? 'fixed inset-0 z-50 max-w-none max-h-none rounded-none border-none' : (editor.isTimelineCollapsed ? 'max-h-[94%]' : 'max-h-[88%]') + ' ' + (editor.aspectRatio === '9:16' ? (editor.isTimelineCollapsed ? 'max-w-[440px] aspect-[9/16]' : 'max-w-[340px] aspect-[9/16]') : editor.aspectRatio === '16:9' ? (editor.isTimelineCollapsed ? 'max-w-[850px] aspect-[16/9]' : 'max-w-[620px] aspect-[16/9]') : editor.aspectRatio === '1:1' ? (editor.isTimelineCollapsed ? 'max-w-[540px] aspect-square' : 'max-w-[420px] aspect-square') : (editor.isTimelineCollapsed ? 'max-w-[850px]' : 'max-w-[620px]'))}"
+          class="relative w-full cursor-pointer select-none touch-none flex items-center justify-center transition-all duration-300 border border-white/10 shadow-2xl overflow-hidden bg-neutral-950 rounded-2xl {isFullscreen ? 'fixed inset-0 z-50 max-w-none max-h-none rounded-none border-none' : (editor.isTimelineCollapsed ? 'max-h-[94%]' : 'max-h-[88%]') + ' ' + (editor.aspectRatio === '9:16' ? (editor.isTimelineCollapsed ? 'max-w-[440px] aspect-[9/16]' : 'max-w-[340px] aspect-[9/16]') : editor.aspectRatio === '16:9' ? (editor.isTimelineCollapsed ? 'max-w-[850px] aspect-[16/9]' : 'max-w-[620px] aspect-[16/9]') : editor.aspectRatio === '21:9' ? (editor.isTimelineCollapsed ? 'max-w-[950px] aspect-[21/9]' : 'max-w-[720px] aspect-[21/9]') : editor.aspectRatio === '1:1' ? (editor.isTimelineCollapsed ? 'max-w-[540px] aspect-square' : 'max-w-[420px] aspect-square') : (editor.isTimelineCollapsed ? 'max-w-[850px]' : 'max-w-[620px]'))}"
           style={editor.aspectRatio === 'original' && !isFullscreen ? `aspect-ratio: ${editor.originalWidth} / ${editor.originalHeight};` : ''}
         >
           {#if isFullscreen}
@@ -886,18 +1068,9 @@
     </div>
 
     <!-- Minimized Transport Control Bar (Pinned Directly Above Timeline) -->
-    <div class="flex-none px-3 sm:px-4 py-1.5 flex items-center justify-between spatial-glass lg:rounded-xl border-t lg:border border-white/10 z-20 transition-all select-none shadow-lg">
-      <!-- Left: Razor Cut & Magnet Snapping & Beat Snapping -->
-      <div class="flex items-center gap-1.5">
-        <button
-          onclick={() => { editor.splitClipAtPlayhead(); editor.triggerHaptic('medium'); }}
-          class="px-2.5 py-1 rounded-lg bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/30 text-sky-300 text-xs font-semibold flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
-          title="Klibi İğne Konumundan Kes / Böl (C)"
-        >
-          <Scissors size={13} />
-          <span>Böl</span>
-        </button>
-
+    <div class="flex-none px-3 sm:px-4 py-1.5 grid grid-cols-3 items-center spatial-glass lg:rounded-xl border-t lg:border border-white/10 z-20 transition-all select-none shadow-lg">
+      <!-- Left: Magnet Snapping & Beat Snapping -->
+      <div class="flex items-center gap-1.5 justify-self-start">
         <button
           onclick={() => {
             editor.isMagnetic = !editor.isMagnetic;
@@ -906,7 +1079,7 @@
           class="p-1.5 rounded-lg transition-colors cursor-pointer {editor.isMagnetic ? 'text-amber-400 bg-amber-500/15 border border-amber-500/25' : 'text-neutral-500 hover:text-neutral-300'}"
           title={editor.isMagnetic ? "Manyetik Yapışma Açık" : "Manyetik Yapışma Kapalı"}
         >
-          <Magnet size={13} />
+          <Magnet size={14} />
         </button>
 
         <button
@@ -917,12 +1090,26 @@
           class="p-1.5 rounded-lg transition-colors cursor-pointer {editor.snapToBeat ? 'text-pink-400 bg-pink-500/15 border border-pink-500/25' : 'text-neutral-500 hover:text-neutral-300'}"
           title={editor.snapToBeat ? "Ritmik Vuruşlara Yapışma Açık" : "Ritmik Vuruşlara Yapışma Kapalı"}
         >
-          <Music size={13} />
+          <Music size={14} />
         </button>
       </div>
 
-      <!-- Center: Minimized Ergonomic Transport (J-K-L Shuttle & Play/Pause) -->
-      <div class="flex items-center gap-2">
+      <!-- Center: True Centered Ergonomic Transport (Başa Al / Geri / Oynat / İleri) -->
+      <div class="flex items-center justify-center gap-2 justify-self-center">
+        <!-- Başa Al (Jump to Start - 00:00:00 - Kare Buton) -->
+        <button
+          onclick={() => {
+            editor.playhead = 0;
+            if (editor.isPlaying) editor.togglePlayback();
+            editor.triggerHaptic('medium');
+            editor.announce('Başa alındı: 00:00:00');
+          }}
+          class="w-7 h-7 rounded-lg bg-white/5 hover:bg-white/15 border border-white/10 flex items-center justify-center transition-all text-neutral-300 hover:text-white active:scale-90 cursor-pointer shadow-sm"
+          title="Videonun En Başına Al (00:00:00)"
+        >
+          <Square size={11} class="fill-current text-white/90" />
+        </button>
+
         <button
           onclick={() => { editor.stepPlayhead(-0.5); editor.triggerHaptic('light'); }}
           class="w-7 h-7 rounded-full hover:bg-white/10 flex items-center justify-center transition-all text-neutral-400 hover:text-white active:scale-90 cursor-pointer"
@@ -952,8 +1139,8 @@
         </button>
       </div>
 
-      <!-- Right: Playhead Timecode, Zoom Controls & Focus Mode Toggle -->
-      <div class="flex items-center gap-1.5">
+      <!-- Right: Zoom Controls & Focus Mode Toggle (Timeline Timecode Removed - already in stage HUD) -->
+      <div class="flex items-center gap-1.5 justify-self-end">
         <div class="hidden sm:flex items-center gap-1 px-1.5 py-0.5 rounded-lg bg-white/5 border border-white/10 text-neutral-400">
           <button 
             onclick={() => editor.zoom = Math.max(10, Math.round(editor.zoom * 0.8))}
@@ -970,11 +1157,6 @@
           >
             <ZoomIn size={12} />
           </button>
-        </div>
-
-        <div class="px-2 py-0.5 rounded-lg bg-white/5 border border-white/10 font-mono text-[11px] text-neutral-300 shadow-inner flex items-center gap-1.5">
-          <span class="w-1.5 h-1.5 rounded-full {editor.isPlaying ? 'bg-rose-500 animate-ping' : 'bg-emerald-400'}"></span>
-          <span>{formatTimecode(editor.playhead)}</span>
         </div>
 
         <button
@@ -1011,9 +1193,11 @@
       {:else}
         <!-- Mobile workspace panel swapping logic (hidden on lg, takes timeline spot) -->
         <div class="flex-1 lg:hidden spatial-glass overflow-hidden flex flex-col h-full w-full">
-          <StudioSidebar isMobileSheet={false} hideTabs={true} />
+          <div class="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
+            <StudioSidebar isMobileSheet={false} hideTabs={false} onClose={() => { editor.mobileWorkspace = 'timeline'; }} />
+          </div>
         </div>
-        <!-- On desktop, if timeline is "swapped", show timeline -->
+        <!-- On desktop, show timeline -->
         <div class="hidden lg:flex flex-1 w-full h-full">
           <Timeline />
         </div>

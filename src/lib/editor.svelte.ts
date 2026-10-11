@@ -4,7 +4,7 @@ import type {
   TransitionType, SubtitleStyle, SubtitlePresetStyle,
   SpeedCurveConfig, SpeedCurvePreset, AudioEnvelopeConfig,
   ScrubbingMode, DecoderTelemetry, AudioClockTelemetry, GpuTelemetry, AgentTelemetry,
-  AppSettingsConfig, ThemeId, TrackType
+  AppSettingsConfig, ThemeId, TrackType, AspectRatio
 } from './types';
 import { get, set } from 'idb-keyval';
 import { getFileFromOPFS, deleteFileFromOPFS } from './opfs';
@@ -66,7 +66,7 @@ class VideoEditor {
   mobileWorkspace = $state<'timeline' | 'media' | 'ai' | 'captions' | 'templates' | 'filters'>('timeline');
   activeBottomSheet = $state<'media' | 'ai' | 'captions' | 'templates' | 'transitions' | 'subtitle_style' | 'speed_curve' | 'audio_envelope' | 'filters' | 'settings' | null>(null);
   activeTransitionCut = $state<{ trackId: string; prevClipId: string; nextClipId: string } | null>(null);
-  aspectRatio = $state<'original' | '16:9' | '9:16' | '1:1'>('original');
+  aspectRatio = $state<AspectRatio>('original');
   originalWidth = $state<number>(1920);
   originalHeight = $state<number>(1080);
   isCommandPaletteOpen = $state<boolean>(false);
@@ -1322,6 +1322,15 @@ class VideoEditor {
   stepPlayhead(deltaSeconds: number) {
     this.playhead = Math.max(0, Math.min(this.duration, Number((this.playhead + deltaSeconds).toFixed(3))));
     masterAudioClock.seek(this.playhead, this.tracks);
+  }
+
+  stepFrame(deltaFrames: number) {
+    const fps = this.projectFps || DEFAULT_PROJECT_FPS;
+    const currentFrame = Math.round(this.playhead * fps);
+    const targetFrame = Math.max(0, Math.min(Math.round(this.duration * fps), currentFrame + deltaFrames));
+    this.playhead = quantizeToFrame(targetFrame / fps, fps);
+    masterAudioClock.seek(this.playhead, this.tracks);
+    this.announce(`Kare: ${formatSMPTETimecode(this.playhead, fps)}`);
   }
 
   seekTo(timeSeconds: number) {

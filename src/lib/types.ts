@@ -159,8 +159,10 @@ export interface MagicTemplate {
   type: TemplateType;
   slots: TemplateSlot[];
   defaultFilter?: string;
-  aspectRatioPreference?: '9:16' | '16:9' | '1:1';
+  aspectRatioPreference?: '9:16' | '16:9' | '1:1' | '21:9';
 }
+
+export type AspectRatio = 'original' | '16:9' | '9:16' | '1:1' | '21:9';
 
 export interface EditorState {
   tracks: TimelineTrack[];

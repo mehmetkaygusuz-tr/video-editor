@@ -1163,7 +1163,7 @@
         ondrop={handleGlobalDrop}
       >
         {#if editor.tracks.length === 0 || editor.tracks.every(t => t.clips.length === 0)}
-          <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-neutral-500 gap-2 select-none z-0">
+          <div class="hidden sm:flex absolute inset-0 flex-col items-center justify-center pointer-events-none text-neutral-500 gap-2 select-none z-0">
             <div class="w-10 h-10 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-neutral-400">
               <FolderClosed size={20} />
             </div>
