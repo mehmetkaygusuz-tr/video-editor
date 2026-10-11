@@ -158,6 +158,26 @@ export class MasterAudioClock {
   }
 
   /**
+   * Real-time live volume adjustment for actively playing audio sources (pop/click-free ramp).
+   */
+  public updateClipVolumeLive(clipId: string, volume: number) {
+    if (!this.ctx) return;
+    const now = this.ctx.currentTime;
+    const targetGain = Math.max(0, Math.min(2.0, volume));
+    for (const item of this.activeSources.values()) {
+      if (item.clipId === clipId) {
+        try {
+          item.gain.gain.cancelScheduledValues(now);
+          item.gain.gain.setValueAtTime(item.gain.gain.value, now);
+          item.gain.gain.linearRampToValueAtTime(targetGain, now + 0.02);
+        } catch (_) {
+          item.gain.gain.value = targetGain;
+        }
+      }
+    }
+  }
+
+  /**
    * Schedule audio buffers on the AudioContext timeline.
    */
   private scheduleClips(fromTimelineTime: number, tracks: TimelineTrack[]) {

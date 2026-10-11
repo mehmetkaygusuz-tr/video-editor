@@ -1,5 +1,7 @@
 <script lang="ts">
   import { Exporter, type ExportOptions, type ExportResult } from '../engine/Exporter';
+  import { editor } from '../editor.svelte';
+  import { formatSMPTETimecode } from '../engine/timeline/timecode';
   import { Dialog } from 'bits-ui';
   import { X, Download, Film, CircleCheck as CheckCircle2, CircleAlert as AlertCircle, Sparkles, LoaderCircle as Loader2 } from '@lucide/svelte';
 
@@ -9,12 +11,24 @@
   let fps = $state<number>(30);
   let format = $state<'mp4' | 'webm'>('mp4');
   let quality = $state<'high' | 'medium'>('high');
+  let exportRange = $state<'entire' | 'in_out'>('entire');
   let isExporting = $state(false);
   let progress = $state(0);
   let statusMessage = $state('Dışa aktarmaya hazır');
   let exportResult = $state<ExportResult | null>(null);
   let errorMessage = $state<string | null>(null);
   let abortController = $state<AbortController | null>(null);
+
+  // Sync export range with In/Out presence when modal opens
+  $effect(() => {
+    if (isOpen) {
+      if (editor.inPoint !== null || editor.outPoint !== null) {
+        exportRange = 'in_out';
+      } else {
+        exportRange = 'entire';
+      }
+    }
+  });
 
   async function handleStartExport() {
     isExporting = true;
@@ -30,6 +44,9 @@
         fps,
         format,
         quality,
+        range: (editor.inPoint !== null || editor.outPoint !== null) ? exportRange : 'entire',
+        inPoint: editor.inPoint,
+        outPoint: editor.outPoint,
         abortSignal: abortController.signal,
         onProgress: (pct, msg) => {
           progress = pct;
@@ -202,6 +219,32 @@
               </button>
             </div>
           </div>
+
+          <!-- Export Range Selector (SMPTE In/Out) -->
+          {#if editor.inPoint !== null || editor.outPoint !== null}
+            <div class="space-y-1.5 p-3 rounded-xl bg-blue-950/20 border border-blue-500/30">
+              <div class="flex items-center justify-between text-xs font-semibold text-neutral-200">
+                <span>Dışa Aktarma Aralığı</span>
+                <span class="text-[10px] text-blue-400 font-mono">
+                  {formatSMPTETimecode(editor.inPoint ?? 0, fps)} &rarr; {formatSMPTETimecode(editor.outPoint ?? editor.duration, fps)}
+                </span>
+              </div>
+              <div class="flex rounded-xl bg-neutral-800/80 p-1 border border-neutral-700">
+                <button
+                  onclick={() => exportRange = 'entire'}
+                  class="flex-1 py-1.5 text-xs rounded-lg font-medium transition-all {exportRange === 'entire' ? 'bg-neutral-700 text-white shadow-sm' : 'text-neutral-400 hover:text-white'}"
+                >
+                  Tüm Çizelge
+                </button>
+                <button
+                  onclick={() => exportRange = 'in_out'}
+                  class="flex-1 py-1.5 text-xs rounded-lg font-medium transition-all {exportRange === 'in_out' ? 'bg-blue-600 text-white shadow-sm font-semibold' : 'text-neutral-400 hover:text-white'}"
+                >
+                  In / Out Seçili Bölge ({Math.max(0.1, ((editor.outPoint ?? editor.duration) - (editor.inPoint ?? 0))).toFixed(1)}s)
+                </button>
+              </div>
+            </div>
+          {/if}
 
           <!-- Feature Note -->
           <div class="p-3 bg-neutral-800/40 rounded-xl border border-neutral-700/50 flex items-start gap-2.5 text-[11px] text-neutral-300">

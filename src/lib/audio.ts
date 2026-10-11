@@ -22,7 +22,9 @@ export function ensureAudioUnlocked() {
   }).catch(console.error);
 }
 
-// Keep the waveform generation as it needs decoding (but only decodes for short files or chunks)
+import { Input, BlobSource, ALL_FORMATS, AudioBufferSink } from 'mediabunny';
+
+// Cache for generated waveform peaks
 const peaksCache = new Map<string, Float32Array>();
 
 export async function generateWaveformPeaks(file: File, numPeaks: number = 1000): Promise<Float32Array> {
@@ -30,35 +32,70 @@ export async function generateWaveformPeaks(file: File, numPeaks: number = 1000)
   if (peaksCache.has(cacheKey)) {
     return peaksCache.get(cacheKey)!;
   }
-  
-  if (file.size > 10 * 1024 * 1024) {
-    // Return dummy peaks for large files to avoid OOM
-    const dummy = new Float32Array(numPeaks);
-    for(let i=0; i<numPeaks; i++) dummy[i] = Math.random() * 0.5;
-    return dummy;
-  }
 
   try {
-    const arrayBuffer = await file.arrayBuffer();
-    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer.slice(0));
-    const channelData = audioBuffer.getChannelData(0);
+    let channelData: Float32Array | null = null;
+
+    // 1. First attempt: Streamlined audio extraction via Mediabunny (safe for 100MB+ videos)
+    try {
+      const input = new Input({
+        source: new BlobSource(file),
+        formats: ALL_FORMATS
+      });
+      const audioTrack = await input.getPrimaryAudioTrack();
+      if (audioTrack) {
+        const sink = new AudioBufferSink(audioTrack);
+        const duration = (await input.computeDuration().catch(() => 60)) || 60;
+        const wrappedBuffers: AudioBuffer[] = [];
+        if (typeof (sink as any).buffers === 'function') {
+          for await (const wrapped of (sink as any).buffers(0, Math.min(600, duration))) {
+            if (wrapped && wrapped.buffer) wrappedBuffers.push(wrapped.buffer);
+            else if (wrapped instanceof AudioBuffer) wrappedBuffers.push(wrapped);
+          }
+        }
+        if (wrappedBuffers.length > 0) {
+          const totalLength = wrappedBuffers.reduce((sum, b) => sum + b.length, 0);
+          const merged = new Float32Array(totalLength);
+          let offset = 0;
+          for (const b of wrappedBuffers) {
+            merged.set(b.getChannelData(0), offset);
+            offset += b.length;
+          }
+          channelData = merged;
+        }
+      }
+    } catch (_) {}
+
+    // 2. Fallback attempt: Direct AudioContext decode for audio files or standard containers
+    if (!channelData || channelData.length === 0) {
+      const arrayBuffer = await file.arrayBuffer();
+      const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer.slice(0));
+      channelData = audioBuffer.getChannelData(0);
+    }
+
+    if (!channelData || channelData.length === 0) {
+      return new Float32Array(numPeaks);
+    }
+
+    // 3. Compute accurate peak envelope (RMS & Max Peak)
     const peaks = new Float32Array(numPeaks);
-    const sampleSize = Math.floor(channelData.length / numPeaks);
-    
+    const sampleSize = Math.max(1, Math.floor(channelData.length / numPeaks));
+
     for (let i = 0; i < numPeaks; i++) {
       const start = i * sampleSize;
-      const end = start + sampleSize;
+      const end = Math.min(channelData.length, start + sampleSize);
       let maxPeak = 0;
       for (let j = start; j < end; j++) {
         const val = Math.abs(channelData[j]);
         if (val > maxPeak) maxPeak = val;
       }
-      peaks[i] = maxPeak;
+      peaks[i] = Math.min(1.0, maxPeak);
     }
-    
+
     peaksCache.set(cacheKey, peaks);
     return peaks;
-  } catch(e) {
+  } catch (e) {
+    console.warn('[audio] Waveform generation fallback:', e);
     return new Float32Array(numPeaks);
   }
 }

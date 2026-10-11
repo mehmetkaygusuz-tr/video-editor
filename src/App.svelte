@@ -215,17 +215,29 @@
       return;
     }
 
-    // Arrow Left / Right: Exact 1 SMPTE frame step (SMPTE Standard)
+    // Arrow Left / Right: Exact SMPTE frame step (Shift for 5 frames)
     if (e.key === 'ArrowLeft') {
       e.preventDefault();
-      editor.stepFrame(-1);
+      editor.stepFrame(e.shiftKey ? -5 : -1);
       editor.triggerHaptic('light');
       return;
     }
     if (e.key === 'ArrowRight') {
       e.preventDefault();
-      editor.stepFrame(1);
+      editor.stepFrame(e.shiftKey ? 5 : 1);
       editor.triggerHaptic('light');
+      return;
+    }
+
+    // Arrow Up / Down: Jump to Previous / Next Edit Point (Premiere / DaVinci Standard)
+    if (e.key === 'ArrowUp') {
+      e.preventDefault();
+      editor.jumpToEditPoint(-1);
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      editor.jumpToEditPoint(1);
       return;
     }
 
@@ -236,26 +248,46 @@
       return;
     }
 
-    // J-K-L Shuttle
+    // J-K-L Shuttle (SMPTE Standard 1x -> 2x -> 4x -> 8x / Stop / Reverse)
     if (e.key.toLowerCase() === 'j') {
       e.preventDefault();
-      editor.stepPlayhead(-0.5);
-      editor.triggerHaptic('light');
+      editor.shuttleReverse();
       return;
     }
     if (e.key.toLowerCase() === 'k') {
       e.preventDefault();
-      if (editor.isPlaying) editor.togglePlayback();
+      editor.shuttleStop();
       return;
     }
     if (e.key.toLowerCase() === 'l') {
       e.preventDefault();
-      editor.stepPlayhead(0.5);
-      editor.triggerHaptic('light');
+      editor.shuttleForward();
       return;
     }
 
-    // C: Split / Razor at playhead
+    // I / O / X: SMPTE In & Out Points (3-Point Editing)
+    if (e.key.toLowerCase() === 'i') {
+      e.preventDefault();
+      editor.setInPoint();
+      return;
+    }
+    if (e.key.toLowerCase() === 'o') {
+      e.preventDefault();
+      editor.setOutPoint();
+      return;
+    }
+    if (e.altKey && e.key.toLowerCase() === 'x') {
+      e.preventDefault();
+      editor.clearInOutPoints();
+      return;
+    }
+    if (e.key.toLowerCase() === 'x' && !e.ctrlKey && !e.metaKey) {
+      e.preventDefault();
+      editor.markClip();
+      return;
+    }
+
+    // C: Split / Razor at playhead (Blade All across unlocked tracks)
     if (e.key.toLowerCase() === 'c') {
       e.preventDefault();
       editor.splitClipAtPlayhead();
@@ -368,7 +400,8 @@
         }
       }
 
-      if (Math.abs(targetTime1 - lastVideoSeekTime) >= (isPlaying ? 0.025 : 0.002) || lastVideoSeekTime < 0) {
+      if (editor.renderFrameDirty || Math.abs(targetTime1 - lastVideoSeekTime) >= (isPlaying ? 0.025 : 0.002) || lastVideoSeekTime < 0) {
+        editor.renderFrameDirty = false;
         const asset1 = editor.assets.find(a => a.id === topClip.assetId) || editor.assets.find(a => a.name === topClip.name);
         const asset2 = bottomClip ? (editor.assets.find(a => a.id === bottomClip.assetId) || editor.assets.find(a => a.name === bottomClip.name)) : null;
 
@@ -1069,8 +1102,17 @@
 
     <!-- Minimized Transport Control Bar (Pinned Directly Above Timeline) -->
     <div class="flex-none px-3 sm:px-4 py-1.5 grid grid-cols-3 items-center spatial-glass lg:rounded-xl border-t lg:border border-white/10 z-20 transition-all select-none shadow-lg">
-      <!-- Left: Magnet Snapping & Beat Snapping -->
+      <!-- Left: Razor Cut & Magnet Snapping & Beat Snapping -->
       <div class="flex items-center gap-1.5 justify-self-start">
+        <button
+          onclick={() => { editor.splitClipAtPlayhead(); editor.triggerHaptic('medium'); }}
+          class="px-2 py-1 rounded-lg bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/30 text-sky-300 text-xs font-semibold flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
+          title="Klibi İğne Konumundan Böl (C / Blade All)"
+        >
+          <Scissors size={13} />
+          <span class="hidden sm:inline">Böl</span>
+        </button>
+
         <button
           onclick={() => {
             editor.isMagnetic = !editor.isMagnetic;
@@ -1094,7 +1136,7 @@
         </button>
       </div>
 
-      <!-- Center: True Centered Ergonomic Transport (Başa Al / Geri / Oynat / İleri) -->
+      <!-- Center: True Centered Ergonomic Transport (Başa Al / 1 Kare Geri / Oynat / 1 Kare İleri) -->
       <div class="flex items-center justify-center gap-2 justify-self-center">
         <!-- Başa Al (Jump to Start - 00:00:00 - Kare Buton) -->
         <button
@@ -1111,9 +1153,9 @@
         </button>
 
         <button
-          onclick={() => { editor.stepPlayhead(-0.5); editor.triggerHaptic('light'); }}
+          onclick={() => { editor.stepFrame(-1); editor.triggerHaptic('light'); }}
           class="w-7 h-7 rounded-full hover:bg-white/10 flex items-center justify-center transition-all text-neutral-400 hover:text-white active:scale-90 cursor-pointer"
-          title="Geri Sar / 0.5s Geri Git (J)"
+          title="1 Kare Geri (Sol Ok / J)"
         >
           <SkipBack size={14} />
         </button>
@@ -1131,9 +1173,9 @@
         </button>
         
         <button
-          onclick={() => { editor.stepPlayhead(0.5); editor.triggerHaptic('light'); }}
+          onclick={() => { editor.stepFrame(1); editor.triggerHaptic('light'); }}
           class="w-7 h-7 rounded-full hover:bg-white/10 flex items-center justify-center transition-all text-neutral-400 hover:text-white active:scale-90 cursor-pointer"
-          title="İleri Sar / 0.5s İleri Git (L)"
+          title="1 Kare İleri (Sağ Ok / L)"
         >
           <SkipForward size={14} />
         </button>

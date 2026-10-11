@@ -1151,6 +1151,28 @@
               </div>
             {/each}
           {/if}
+
+          <!-- SMPTE In / Out Selected Range Highlight on Ruler -->
+          {#if editor.inPoint !== null || editor.outPoint !== null}
+            {@const startX = (editor.inPoint ?? 0) * editor.zoom}
+            {@const endX = (editor.outPoint ?? editor.duration) * editor.zoom}
+            {@const rangeWidth = Math.max(2, endX - startX)}
+            <div 
+              class="absolute top-0 bottom-0 bg-indigo-500/25 border-x-2 border-indigo-400 z-10 pointer-events-none shadow-[0_0_12px_rgba(99,102,241,0.3)]"
+              style="left: {startX}px; width: {rangeWidth}px;"
+            >
+              {#if editor.inPoint !== null}
+                <div class="absolute top-0.5 left-0.5 text-[8px] font-bold text-indigo-200 font-mono bg-indigo-950/90 px-1 rounded-xs border border-indigo-500/50">
+                  [IN]
+                </div>
+              {/if}
+              {#if editor.outPoint !== null}
+                <div class="absolute top-0.5 right-0.5 text-[8px] font-bold text-indigo-200 font-mono bg-indigo-950/90 px-1 rounded-xs border border-indigo-500/50">
+                  [OUT]
+                </div>
+              {/if}
+            </div>
+          {/if}
         </div>
       </div>
 

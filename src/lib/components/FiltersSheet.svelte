@@ -100,7 +100,7 @@
           }
         }
       }
-      editor.saveState();
+      editor.renderFrameDirty = true;
     } else {
       const current = selectedClip.colorGrading || {
         brightness: 0,
@@ -109,13 +109,18 @@
         temperature: 0,
         tint: 0
       };
+      // Real-time visual update without history flooding (save = false)
       editor.updateClip(selectedClip.id, {
         colorGrading: {
           ...current,
           [param]: val
         }
-      });
+      }, false);
     }
+  }
+
+  function commitColorParam() {
+    editor.saveState();
   }
 
   function copySelectedGradeToAll() {
@@ -393,7 +398,12 @@
     <!-- Quick Live Adjustment Sliders (When a clip is selected) -->
     {#if selectedClip}
       {@const grading = selectedClip.colorGrading || { brightness: 0, contrast: 1, saturation: 1, temperature: 0 }}
-      <div class="p-2.5 rounded-xl bg-neutral-900/60 border border-white/5 space-y-2">
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
+      <div 
+        class="p-2.5 rounded-xl bg-neutral-900/60 border border-white/5 space-y-2"
+        onpointerup={commitColorParam}
+        onpointercancel={commitColorParam}
+      >
         <span class="text-[10px] font-mono uppercase tracking-wider text-neutral-400 font-semibold block">Manuel İnce Ayar (Canlı Önizleme)</span>
         
         <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">

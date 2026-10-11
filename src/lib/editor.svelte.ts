@@ -80,6 +80,17 @@ class VideoEditor {
   isBottomPanelExpanded = $state(false);
   isExportOpen = $state(false);
 
+  // SMPTE In / Out Edit Range (3-Point Editing & Regional Render)
+  inPoint = $state<number | null>(null);
+  outPoint = $state<number | null>(null);
+
+  // Real-time canvas frame dirty flag (allows instant color grade re-render when paused)
+  renderFrameDirty = $state<boolean>(false);
+
+  // SMPTE J-K-L Shuttle Navigation
+  shuttleSpeed = $state<number>(1);
+  shuttleDirection = $state<'forward' | 'reverse' | 'paused'>('paused');
+
   // Step 1: GOP-Aware Two-Tier Scrubbing & Decoder Telemetry
   scrubbingMode = $state<ScrubbingMode>('adaptive');
   isScrubbing = $state(false);
@@ -751,12 +762,18 @@ class VideoEditor {
     }
   }
 
-  updateClip(clipId: string, partial: Partial<TimelineClip>) {
+  updateClip(clipId: string, partial: Partial<TimelineClip>, save: boolean = true) {
     for (const track of this.tracks) {
       const clip = track.clips.find(c => c.id === clipId);
       if (clip) {
         Object.assign(clip, partial);
-        this.saveState();
+        if (partial.volume !== undefined) {
+          masterAudioClock.updateClipVolumeLive(clipId, partial.volume);
+        }
+        if (partial.colorGrading !== undefined || partial.transitionIn !== undefined || partial.transitionOut !== undefined) {
+          this.renderFrameDirty = true;
+        }
+        if (save) this.saveState();
         break;
       }
     }
@@ -1075,122 +1092,232 @@ class VideoEditor {
 
   splitClipAtPlayhead(clipId?: string) {
     const splitTime = quantizeToFrame(this.playhead, this.projectFps);
-    let targetClip: TimelineClip | undefined;
-    let targetTrack: TimelineTrack | undefined;
 
-    // Find requested clip or selected clip, or clip intersecting playhead
+    // 1. Identify target clips to split
+    const targetsToSplit: { track: TimelineTrack; clip: TimelineClip }[] = [];
+
     if (clipId || this.selectedClipId) {
       const searchId = clipId || this.selectedClipId;
       for (const track of this.tracks) {
+        if (track.isLocked) continue;
         const found = track.clips.find(c => c.id === searchId);
         if (found) {
-          targetClip = found;
-          targetTrack = track;
+          targetsToSplit.push({ track, clip: found });
           break;
         }
       }
-    }
-
-    // Fallback: Find clip at playhead on any track
-    if (!targetClip) {
+    } else {
+      // Professional NLE "Blade All": Split all clips intersecting playhead across all unlocked tracks
       for (const track of this.tracks) {
+        if (track.isLocked) continue;
         const found = track.clips.find(c => splitTime > c.startAt + 0.05 && splitTime < c.startAt + c.duration - 0.05);
         if (found) {
-          targetClip = found;
-          targetTrack = track;
-          break;
+          targetsToSplit.push({ track, clip: found });
         }
       }
     }
 
-    if (!targetClip || !targetTrack) {
+    if (targetsToSplit.length === 0) {
       this.announce('Bölünecek geçerli bir klip veya oynatma konumu bulunamadı.');
       return;
     }
 
-    if (targetTrack.isLocked) {
-      this.announce('Kilitli izdeki klip bölünemez.');
-      return;
-    }
+    let lastCreatedClipId: string | null = null;
+    let splitCount = 0;
 
-    // Ensure splitTime is strictly inside the clip bounds with at least 0.1s on each side
-    if (splitTime <= targetClip.startAt + 0.05 || splitTime >= targetClip.startAt + targetClip.duration - 0.05) {
-      this.announce('Klip bölme için en az 1 kare mesafe gereklidir.');
-      return;
-    }
+    for (const { track: targetTrack, clip: targetClip } of targetsToSplit) {
+      if (splitTime <= targetClip.startAt + 0.05 || splitTime >= targetClip.startAt + targetClip.duration - 0.05) {
+        continue;
+      }
 
-    const firstDuration = quantizeToFrame(splitTime - targetClip.startAt, this.projectFps);
-    const secondDuration = quantizeToFrame(targetClip.duration - firstDuration, this.projectFps);
-    if (firstDuration < 0.05 || secondDuration < 0.05) {
-      this.announce('Bölünen parçalar en az 1 kare olmalıdır.');
-      return;
-    }
-    const secondSourceOffset = quantizeToFrame(targetClip.sourceOffset + firstDuration, this.projectFps);
+      const firstDuration = quantizeToFrame(splitTime - targetClip.startAt, this.projectFps);
+      const secondDuration = quantizeToFrame(targetClip.duration - firstDuration, this.projectFps);
+      if (firstDuration < 0.05 || secondDuration < 0.05) continue;
 
-    // Deep clone subtitles for split segments if present
-    let firstSubs = undefined;
-    let secondSubs = undefined;
+      const secondSourceOffset = quantizeToFrame(targetClip.sourceOffset + firstDuration, this.projectFps);
 
-    if (targetClip.subtitles && targetClip.subtitles.length > 0) {
-      firstSubs = targetClip.subtitles
-        .filter(s => s.start < firstDuration)
-        .map(s => ({ ...s, end: Math.min(s.end, firstDuration) }));
+      let firstSubs = undefined;
+      let secondSubs = undefined;
 
-      secondSubs = targetClip.subtitles
-        .filter(s => s.end > firstDuration)
-        .map(s => ({
-          ...s,
-          start: Math.max(0, s.start - firstDuration),
-          end: s.end - firstDuration
-        }));
-    }
+      if (targetClip.subtitles && targetClip.subtitles.length > 0) {
+        firstSubs = targetClip.subtitles
+          .filter(s => s.start < firstDuration)
+          .map(s => ({ ...s, end: Math.min(s.end, firstDuration) }));
 
-    // Update left clip
-    targetClip.duration = firstDuration;
-    if (firstSubs) targetClip.subtitles = firstSubs;
+        secondSubs = targetClip.subtitles
+          .filter(s => s.end > firstDuration)
+          .map(s => ({
+            ...s,
+            start: Math.max(0, s.start - firstDuration),
+            end: s.end - firstDuration
+          }));
+      }
 
-    // Create right clip
-    const newRightClip: TimelineClip = {
-      id: crypto.randomUUID(),
-      trackId: targetTrack.id,
-      assetId: targetClip.assetId,
-      sourceUrl: targetClip.sourceUrl,
-      name: `${targetClip.name} (Bölüm 2)`,
-      startAt: splitTime,
-      duration: secondDuration,
-      sourceOffset: secondSourceOffset,
-      color: targetClip.color,
-      type: targetClip.type,
-      cropRect: targetClip.cropRect ? { ...targetClip.cropRect } : undefined,
-      isBgRemoved: targetClip.isBgRemoved,
-      colorGrading: targetClip.colorGrading ? { ...targetClip.colorGrading } : undefined,
-      volume: targetClip.volume,
-      speed: targetClip.speed,
-      speedCurve: targetClip.speedCurve ? JSON.parse(JSON.stringify(targetClip.speedCurve)) : undefined,
-      audioEnvelope: targetClip.audioEnvelope ? { ...targetClip.audioEnvelope } : undefined,
-      reframeKeyframes: targetClip.reframeKeyframes ? [...targetClip.reframeKeyframes] : undefined,
-      subtitles: secondSubs
-    };
+      // Update left clip
+      targetClip.duration = firstDuration;
+      if (firstSubs) targetClip.subtitles = firstSubs;
 
-    targetTrack.clips.push(newRightClip);
+      // Create right clip
+      const newRightClip: TimelineClip = {
+        id: crypto.randomUUID(),
+        trackId: targetTrack.id,
+        assetId: targetClip.assetId,
+        sourceUrl: targetClip.sourceUrl,
+        name: `${targetClip.name} (Bölüm 2)`,
+        startAt: splitTime,
+        duration: secondDuration,
+        sourceOffset: secondSourceOffset,
+        color: targetClip.color,
+        type: targetClip.type,
+        cropRect: targetClip.cropRect ? { ...targetClip.cropRect } : undefined,
+        isBgRemoved: targetClip.isBgRemoved,
+        colorGrading: targetClip.colorGrading ? { ...targetClip.colorGrading } : undefined,
+        volume: targetClip.volume,
+        speed: targetClip.speed,
+        speedCurve: targetClip.speedCurve ? JSON.parse(JSON.stringify(targetClip.speedCurve)) : undefined,
+        audioEnvelope: targetClip.audioEnvelope ? { ...targetClip.audioEnvelope } : undefined,
+        reframeKeyframes: targetClip.reframeKeyframes ? [...targetClip.reframeKeyframes] : undefined,
+        subtitles: secondSubs
+      };
 
-    // Re-anchor any connected child clips starting after splitTime to the new right clip
-    for (const track of this.tracks) {
-      for (const child of track.clips) {
-        if (child.parentClipId === targetClip.id && child.startAt >= splitTime) {
-          child.parentClipId = newRightClip.id;
-          child.anchorOffset = quantizeToFrame(child.startAt - newRightClip.startAt, this.projectFps);
+      targetTrack.clips.push(newRightClip);
+
+      // Re-anchor any connected child clips starting after splitTime to the new right clip
+      for (const track of this.tracks) {
+        for (const child of track.clips) {
+          if (child.parentClipId === targetClip.id && child.startAt >= splitTime) {
+            child.parentClipId = newRightClip.id;
+            child.anchorOffset = quantizeToFrame(child.startAt - newRightClip.startAt, this.projectFps);
+          }
         }
       }
+
+      targetTrack.clips.sort((a, b) => a.startAt - b.startAt);
+      lastCreatedClipId = newRightClip.id;
+      splitCount++;
     }
 
-    // Sort clips chronologically by startAt
-    targetTrack.clips.sort((a, b) => a.startAt - b.startAt);
+    if (splitCount > 0) {
+      if (lastCreatedClipId) this.selectedClipId = lastCreatedClipId;
+      this.saveState();
+      this.triggerHaptic('medium');
+      this.announce(splitCount === 1 ? 'Klip bölündü' : `${splitCount} kanal aynı anda bölündü`);
+    } else {
+      this.announce('Klip bölme için en az 1 kare mesafe gereklidir.');
+    }
+  }
 
-    this.selectedClipId = newRightClip.id;
-    this.saveState();
+  // --- SMPTE In / Out Points (3-Point Editing & Range Export) ---
+  setInPoint(time?: number) {
+    const t = quantizeToFrame(time ?? this.playhead, this.projectFps);
+    this.inPoint = t;
+    if (this.outPoint !== null && this.inPoint >= this.outPoint) {
+      this.outPoint = null;
+    }
+    this.triggerHaptic('light');
+    this.announce(`Giriş noktası (In): ${formatSMPTETimecode(this.inPoint, this.projectFps)}`);
+  }
+
+  setOutPoint(time?: number) {
+    const t = quantizeToFrame(time ?? this.playhead, this.projectFps);
+    this.outPoint = t;
+    if (this.inPoint !== null && this.outPoint <= this.inPoint) {
+      this.inPoint = null;
+    }
+    this.triggerHaptic('light');
+    this.announce(`Çıkış noktası (Out): ${formatSMPTETimecode(this.outPoint, this.projectFps)}`);
+  }
+
+  clearInOutPoints() {
+    this.inPoint = null;
+    this.outPoint = null;
+    this.triggerHaptic('light');
+    this.announce('In ve Out noktaları temizlendi.');
+  }
+
+  markClip() {
+    const clip = this.getSelectedClip();
+    if (!clip) {
+      this.announce('In/Out için seçili bir klip bulunamadı.');
+      return;
+    }
+    this.inPoint = quantizeToFrame(clip.startAt, this.projectFps);
+    this.outPoint = quantizeToFrame(clip.startAt + clip.duration, this.projectFps);
     this.triggerHaptic('medium');
-    this.announce(`Klip bölündü: ${targetClip.name}`);
+    this.announce(`Klip aralığı işaretlendi: ${clip.name}`);
+  }
+
+  // --- SMPTE J-K-L Shuttle Navigation & Cut Point Jumping ---
+  shuttleForward() {
+    if (!this.isPlaying) {
+      this.shuttleSpeed = 1;
+      this.shuttleDirection = 'forward';
+      masterAudioClock.setPlaybackRate(1);
+      this.togglePlayback();
+    } else if (this.shuttleDirection === 'forward') {
+      const speeds = [1, 2, 4, 8];
+      const idx = speeds.indexOf(this.shuttleSpeed);
+      this.shuttleSpeed = speeds[Math.min(speeds.length - 1, (idx === -1 ? 0 : idx) + 1)];
+      masterAudioClock.setPlaybackRate(this.shuttleSpeed);
+    } else {
+      this.shuttleSpeed = 1;
+      this.shuttleDirection = 'forward';
+      masterAudioClock.setPlaybackRate(1);
+    }
+    this.announce(`İleri Oynatma: ${this.shuttleSpeed}x`);
+  }
+
+  shuttleReverse() {
+    if (this.isPlaying && this.shuttleDirection === 'forward' && this.shuttleSpeed > 1) {
+      const speeds = [1, 2, 4, 8];
+      const idx = speeds.indexOf(this.shuttleSpeed);
+      this.shuttleSpeed = speeds[Math.max(0, idx - 1)];
+      masterAudioClock.setPlaybackRate(this.shuttleSpeed);
+    } else if (this.isPlaying && this.shuttleDirection === 'forward') {
+      this.togglePlayback();
+      this.shuttleDirection = 'paused';
+    } else {
+      this.stepFrame(-5);
+    }
+    this.announce('Geri Sarma / Adım');
+  }
+
+  shuttleStop() {
+    if (this.isPlaying) {
+      this.togglePlayback();
+    }
+    this.shuttleSpeed = 1;
+    this.shuttleDirection = 'paused';
+    masterAudioClock.setPlaybackRate(1);
+    this.announce('Durduruldu');
+  }
+
+  jumpToEditPoint(direction: 1 | -1) {
+    const cutTimes: number[] = [0];
+    for (const track of this.tracks) {
+      for (const clip of track.clips) {
+        cutTimes.push(clip.startAt);
+        cutTimes.push(clip.startAt + clip.duration);
+      }
+    }
+    const unique = Array.from(new Set(cutTimes)).sort((a, b) => a - b);
+    const current = this.playhead;
+    const threshold = 0.05;
+
+    let targetTime = current;
+    if (direction === 1) {
+      const next = unique.find(t => t > current + threshold);
+      if (next !== undefined) targetTime = next;
+    } else {
+      const prevs = unique.filter(t => t < current - threshold);
+      if (prevs.length > 0) targetTime = prevs[prevs.length - 1];
+      else targetTime = 0;
+    }
+
+    this.playhead = quantizeToFrame(targetTime, this.projectFps);
+    masterAudioClock.seek(this.playhead, this.tracks);
+    this.triggerHaptic('light');
+    this.announce(`Kesim noktası: ${formatSMPTETimecode(this.playhead, this.projectFps)}`);
   }
 
   /**

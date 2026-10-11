@@ -24,6 +24,9 @@ export interface ExportOptions {
   fps?: number;
   format?: 'mp4' | 'webm';
   quality?: 'high' | 'medium';
+  range?: 'entire' | 'in_out';
+  inPoint?: number | null;
+  outPoint?: number | null;
   onProgress?: (percent: number, message: string) => void;
   abortSignal?: AbortSignal;
 }
@@ -46,6 +49,9 @@ export class Exporter {
       fps = 30,
       format = 'mp4',
       quality = 'high',
+      range = 'entire',
+      inPoint = null,
+      outPoint = null,
       onProgress = () => {},
       abortSignal
     } = options;
@@ -70,6 +76,15 @@ export class Exporter {
       if (end > totalDuration) totalDuration = end;
     }
     totalDuration = Math.max(1, Number(totalDuration.toFixed(2)));
+
+    // Calculate In/Out Regional Range
+    let startSec = 0;
+    let endSec = totalDuration;
+    if (range === 'in_out') {
+      if (inPoint !== null && inPoint !== undefined) startSec = Math.max(0, inPoint);
+      if (outPoint !== null && outPoint !== undefined) endSec = Math.min(totalDuration, outPoint);
+    }
+    const durationToExport = Math.max(0.1, Number((endSec - startSec).toFixed(2)));
 
     // 1. Offscreen Render Canvas
     const canvas = document.createElement('canvas');
@@ -114,7 +129,7 @@ export class Exporter {
     onProgress(4, 'Zaman çizgisi sesleri çok hızlı miksleniyor (Faster-Than-Realtime)...');
     let hasAudioTrack = false;
     try {
-      const mixedAudioBuffer = await this.mixTimelineAudio(totalDuration);
+      const mixedAudioBuffer = await this.mixTimelineAudio(totalDuration, startSec, durationToExport);
       if (mixedAudioBuffer && mixedAudioBuffer.length > 0) {
         const audioSource = new AudioBufferSource({ codec: selectedAudioCodec });
         output.addAudioTrack(audioSource);
@@ -144,7 +159,7 @@ export class Exporter {
       }
     }
 
-    const totalFrames = Math.ceil(totalDuration * fps);
+    const totalFrames = Math.ceil(durationToExport * fps);
     const dt = 1 / fps;
     const startTime = performance.now();
 
@@ -155,7 +170,7 @@ export class Exporter {
           throw new Error('Dışa aktarma kullanıcı tarafından iptal edildi.');
         }
 
-        const t = frameIdx * dt;
+        const t = startSec + (frameIdx * dt);
 
         // Base: Clear canvas to pure cinematic black
         ctx.fillStyle = '#000000';
@@ -382,21 +397,34 @@ export class Exporter {
   /**
    * Mixes all audio clips and video audio tracks using OfflineAudioContext (Faster-Than-Realtime)
    */
-  private static async mixTimelineAudio(totalDuration: number): Promise<AudioBuffer | null> {
+  private static async mixTimelineAudio(
+    totalDuration: number,
+    startSec: number = 0,
+    durationToExport?: number
+  ): Promise<AudioBuffer | null> {
     const audioClips = editor.tracks
       .flatMap(t => t.clips)
       .filter(c => (c.type === 'audio' || (c.type === 'video' && (c.volume ?? 1) > 0)));
 
     if (audioClips.length === 0) return null;
 
+    const exportDuration = durationToExport ?? totalDuration;
+    const endSec = startSec + exportDuration;
     const sampleRate = 48000;
-    const lengthInSamples = Math.max(sampleRate, Math.ceil(totalDuration * sampleRate));
+    const lengthInSamples = Math.max(sampleRate, Math.ceil(exportDuration * sampleRate));
     const offlineCtx = new OfflineAudioContext(2, lengthInSamples, sampleRate);
 
     let attachedAny = false;
 
     for (const clip of audioClips) {
       try {
+        const clipStart = clip.startAt;
+        const clipEnd = clip.startAt + clip.duration;
+        const overlapStart = Math.max(clipStart, startSec);
+        const overlapEnd = Math.min(clipEnd, endSec);
+
+        if (overlapEnd <= overlapStart) continue;
+
         const clipAudioBuffer = await masterAudioClock.getOrDecodeAudioBuffer(clip);
         if (clipAudioBuffer) {
           const sourceNode = offlineCtx.createBufferSource();
@@ -408,12 +436,15 @@ export class Exporter {
           sourceNode.connect(gainNode);
           gainNode.connect(offlineCtx.destination);
 
-          const startTime = Math.max(0, clip.startAt);
-          const offset = Math.max(0, clip.sourceOffset || 0);
-          const duration = Math.min(clip.duration, Math.max(0, clipAudioBuffer.duration - offset));
+          const destStartTime = overlapStart - startSec;
+          const clipLocalTime = overlapStart - clipStart;
+          const sourceOffset = (clip.sourceOffset || 0) + clipLocalTime;
+          const playDuration = overlapEnd - overlapStart;
+          const availableBufferDuration = Math.max(0, clipAudioBuffer.duration - sourceOffset);
+          const finalDuration = Math.min(playDuration, availableBufferDuration);
 
-          if (duration > 0) {
-            sourceNode.start(startTime, offset, duration);
+          if (finalDuration > 0) {
+            sourceNode.start(destStartTime, sourceOffset, finalDuration);
             attachedAny = true;
           }
         }
