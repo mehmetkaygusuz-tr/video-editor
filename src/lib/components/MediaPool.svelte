@@ -1,7 +1,7 @@
 <script lang="ts">
   import { editor } from '../editor.svelte';
+  import { engine } from '../engine/orchestrator.svelte';
   import { saveFileToOPFS } from '../opfs';
-  import { detectAudioBeats } from '../audio';
   import { Plus, Film, Music, Image as ImageIcon, Upload, Wand2, Trash2 } from '@lucide/svelte';
 
   let fileInput: HTMLInputElement;
@@ -29,6 +29,12 @@
           const v = document.createElement('video');
           v.preload = 'metadata';
           v.src = blobUrl;
+          const cleanup = () => {
+            v.onloadedmetadata = null;
+            v.onerror = null;
+            v.removeAttribute('src');
+            v.load();
+          };
           v.onloadedmetadata = () => {
             if (v.videoWidth && v.videoHeight) {
               editor.originalWidth = v.videoWidth;
@@ -37,6 +43,10 @@
                 asset.duration = v.duration;
               }
             }
+            cleanup();
+          };
+          v.onerror = () => {
+            cleanup();
           };
         } else if (type === 'image') {
           const img = new Image();
@@ -47,22 +57,6 @@
               editor.originalHeight = img.naturalHeight;
             }
           };
-        }
-
-        // If audio or video with audio, trigger background beat detection
-        if (type === 'audio' || type === 'video') {
-          detectAudioBeats(file).then(({ bpm, beats }) => {
-            if (beats.length > 0) {
-              editor.activeBpm = bpm;
-              editor.beatMarkers = beats.map((t, idx) => ({
-                id: `beat-${idx}`,
-                time: t,
-                label: `Vuruş ${idx + 1}`,
-                intensity: 1
-              }));
-              editor.announce(`${bpm} BPM ritim tespit edildi, ${beats.length} vuruş noktası eklendi.`);
-            }
-          }).catch(console.warn);
         }
       } catch (err) {
         console.error("Failed to import asset:", err);
@@ -146,6 +140,11 @@
       editor.announce(`"${asset.name}" zaman çizelgesine eklendi.`);
     }
   }
+
+  function handleDeleteAsset(asset: any) {
+    engine.removeAsset(asset.name);
+    editor.deleteAsset(asset.id);
+  }
 </script>
 
 <div class="w-full h-full bg-neutral-900 border-r border-neutral-800 flex flex-col shrink-0" role="region" aria-label="Medya Havuzu">
@@ -211,7 +210,7 @@
             <Plus size={14} />
           </button>
           <button
-            onclick={() => editor.deleteAsset(asset.id)}
+            onclick={() => handleDeleteAsset(asset)}
             class="opacity-0 group-hover:opacity-100 group-focus-within:opacity-100 p-1.5 rounded-md bg-neutral-800 hover:bg-rose-600 text-neutral-400 hover:text-white transition-all focus-visible:opacity-100 focus-visible:ring-2 focus-visible:ring-rose-400 focus-visible:outline-none"
             title="Medyayı Sil"
             aria-label="{asset.name} medyasını sil"

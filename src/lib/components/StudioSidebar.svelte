@@ -1,5 +1,6 @@
 <script lang="ts">
   import { editor } from '../editor.svelte';
+  import { engine } from '../engine/orchestrator.svelte';
   import { aiService } from '../engine/aiService.svelte';
   import { agenticEditor } from '../engine/AgenticEditor';
   import { saveFileToOPFS } from '../opfs';
@@ -58,13 +59,20 @@
             mediaEl.preload = 'metadata';
             mediaEl.src = blobUrl;
             await new Promise((res) => {
+              const cleanup = () => {
+                mediaEl.onloadedmetadata = null;
+                mediaEl.onerror = null;
+                mediaEl.removeAttribute('src');
+                mediaEl.load();
+                res(null);
+              };
               mediaEl.onloadedmetadata = () => {
                 if (Number.isFinite(mediaEl.duration)) {
                   duration = mediaEl.duration;
                 }
-                res(null);
+                cleanup();
               };
-              mediaEl.onerror = () => res(null);
+              mediaEl.onerror = () => cleanup();
             });
           } catch (_) {}
         }
@@ -144,6 +152,11 @@
       );
       editor.announce(`"${asset.name}" zaman çizelgesine eklendi.`);
     }
+  }
+
+  function handleDeleteAsset(asset: any) {
+    engine.removeAsset(asset.name);
+    editor.deleteAsset(asset.id);
   }
 
   async function runWhisperCaptions() {
@@ -334,7 +347,7 @@
                     <Plus size={12} /> Ekle
                   </button>
                   <button 
-                    onclick={() => editor.deleteAsset(asset.id)}
+                    onclick={() => handleDeleteAsset(asset)}
                     class="p-1.5 text-neutral-500 hover:text-rose-400 hover:bg-neutral-800 rounded-md transition-colors focus-visible:ring-2 focus-visible:ring-rose-500 focus-visible:outline-none"
                     title="Medyayı Sil"
                     aria-label="{asset.name} medyasını sil"

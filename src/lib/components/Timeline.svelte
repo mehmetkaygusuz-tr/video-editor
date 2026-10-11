@@ -4,7 +4,6 @@
   import { aiService } from '../engine/aiService.svelte';
   import { masterAudioClock } from '../engine/audioClock';
   import Waveform from './Waveform.svelte';
-  import TimelineStage from './TimelineStage.svelte';
   import type { TimelineClip, TimelineTrack, SeekOptions } from '../types';
   import { quantizeToFrame } from '../engine/timeline/timecode';
   import { 
@@ -1022,8 +1021,6 @@
 
     <!-- Tracks Canvas (Scrollable) -->
     <div class="relative flex-1 h-full overflow-hidden bg-neutral-900/50">
-      <TimelineStage />
-      
       <!-- Adaptive NLE Ruler (Spatial Glass) -->
       <div 
         class="absolute top-0 left-0 right-0 h-7 border-b border-white/10 spatial-glass-subtle z-10 select-none overflow-hidden"

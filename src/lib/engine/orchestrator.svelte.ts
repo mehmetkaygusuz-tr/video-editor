@@ -8,6 +8,8 @@ export type WorkerMessage = {
     payload?: any;
 };
 
+const MAX_ACTIVE_DECODERS = 3;
+
 export class EngineOrchestrator {
     #demuxerWorker: Worker | null = null;
     #aiWorker: Worker | null = null;
@@ -196,6 +198,22 @@ export class EngineOrchestrator {
         try {
             let video = this.#videoElementCache.get(file.name);
             if (!video) {
+                // Evict oldest native video element if cache limit reached
+                if (this.#videoElementCache.size >= MAX_ACTIVE_DECODERS) {
+                    const oldestKey = this.#videoElementCache.keys().next().value;
+                    if (oldestKey) {
+                        const oldEl = this.#videoElementCache.get(oldestKey);
+                        if (oldEl) {
+                            try {
+                                oldEl.pause();
+                                oldEl.removeAttribute('src');
+                                oldEl.load();
+                            } catch (_) {}
+                        }
+                        this.#videoElementCache.delete(oldestKey);
+                    }
+                }
+
                 const el = document.createElement('video');
                 el.preload = 'auto';
                 el.muted = true;
@@ -217,6 +235,10 @@ export class EngineOrchestrator {
                     if (el.readyState >= 1) resolve();
                 });
                 video = el;
+                this.#videoElementCache.set(file.name, video);
+            } else {
+                // Refresh LRU position in Map
+                this.#videoElementCache.delete(file.name);
                 this.#videoElementCache.set(file.name, video);
             }
 
@@ -243,6 +265,38 @@ export class EngineOrchestrator {
         return null;
     }
 
+    clearMediaCache() {
+        this.#decoderMap.forEach(d => {
+            try { d.dispose(); } catch (_) {}
+        });
+        this.#decoderMap.clear();
+        this.#videoElementCache.forEach(v => {
+            try {
+                v.pause();
+                v.removeAttribute('src');
+                v.load();
+            } catch (_) {}
+        });
+        this.#videoElementCache.clear();
+    }
+
+    removeAsset(fileName: string) {
+        const dec = this.#decoderMap.get(fileName);
+        if (dec) {
+            try { dec.dispose(); } catch (_) {}
+            this.#decoderMap.delete(fileName);
+        }
+        const vid = this.#videoElementCache.get(fileName);
+        if (vid) {
+            try {
+                vid.pause();
+                vid.removeAttribute('src');
+                vid.load();
+            } catch (_) {}
+            this.#videoElementCache.delete(fileName);
+        }
+    }
+
     async seekFrameWithTransition(
         clip1: { file: File, time: number, grading?: any },
         clip2: { file: File, time: number, grading?: any } | null,
@@ -258,6 +312,15 @@ export class EngineOrchestrator {
                 const newDecoder = new VideoDecoderWrapper();
                 try {
                     await newDecoder.load(info.file);
+                    // Mobile WebCodecs hardware limit: evict LRU decoder if >= MAX_ACTIVE_DECODERS
+                    if (this.#decoderMap.size >= MAX_ACTIVE_DECODERS) {
+                        const oldestKey = this.#decoderMap.keys().next().value;
+                        if (oldestKey) {
+                            const oldDecoder = this.#decoderMap.get(oldestKey);
+                            try { oldDecoder?.dispose(); } catch (_) {}
+                            this.#decoderMap.delete(oldestKey);
+                        }
+                    }
                     this.#decoderMap.set(info.file.name, newDecoder);
                     decoder = newDecoder;
                 } catch (err) {
@@ -265,6 +328,10 @@ export class EngineOrchestrator {
                 } finally {
                     this.#loadingFiles.delete(info.file.name);
                 }
+            } else {
+                // Refresh LRU position in Map
+                this.#decoderMap.delete(info.file.name);
+                this.#decoderMap.set(info.file.name, decoder);
             }
             if (decoder) {
                 try {
@@ -383,12 +450,7 @@ export class EngineOrchestrator {
 
     destroy() {
         console.log('[Orchestrator] Terminating workers and disposing decoders...');
-        this.#decoderMap.forEach(d => d.dispose());
-        this.#decoderMap.clear();
-        this.#videoElementCache.forEach(v => {
-            try { URL.revokeObjectURL(v.src); v.src = ''; } catch (_) {}
-        });
-        this.#videoElementCache.clear();
+        this.clearMediaCache();
         this.#demuxerWorker?.terminate();
         this.#aiWorker?.terminate();
         this.#mediaWorker?.terminate();

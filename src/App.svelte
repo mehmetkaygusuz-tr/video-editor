@@ -485,6 +485,9 @@
         editor.togglePlayback();
       }
       
+      // Periodically schedule upcoming audio clips within the lookahead window
+      masterAudioClock.checkLookahead(masterTime, editor.tracks);
+
       // Hardware latency-compensated video presentation time (Master Audio Clock)
       const videoPTS = masterAudioClock.getVideoPresentationTime(editor.playhead);
       editor.updateAudioClockTelemetry(masterAudioClock.getTelemetry());
@@ -571,13 +574,20 @@
             mediaEl.preload = 'metadata';
             mediaEl.src = blobUrl;
             await new Promise((res) => {
+              const cleanup = () => {
+                mediaEl.onloadedmetadata = null;
+                mediaEl.onerror = null;
+                mediaEl.removeAttribute('src');
+                mediaEl.load();
+                res(null);
+              };
               mediaEl.onloadedmetadata = () => {
                 if (Number.isFinite(mediaEl.duration)) {
                   duration = mediaEl.duration;
                 }
-                res(null);
+                cleanup();
               };
-              mediaEl.onerror = () => res(null);
+              mediaEl.onerror = () => cleanup();
             });
           } catch (_) {}
         }
@@ -595,6 +605,7 @@
       editor.assets.forEach(a => {
         if (a.blobUrl) URL.revokeObjectURL(a.blobUrl);
       });
+      engine.clearMediaCache();
       editor.tracks = [];
       editor.assets = [];
       editor.playhead = 0;

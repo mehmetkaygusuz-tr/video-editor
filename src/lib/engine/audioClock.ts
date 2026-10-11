@@ -23,6 +23,10 @@ export class MasterAudioClock {
   private audioBufferCache = new Map<string, AudioBuffer>();
   private pendingDecodes = new Map<string, Promise<AudioBuffer | null>>();
 
+  // Active lookahead scheduling trackers
+  private scheduledClipIds = new Set<string>();
+  private lastLookaheadCheckTime = 0;
+
   // Telemetry
   private lastDriftMs = 0;
 
@@ -213,6 +217,9 @@ export class MasterAudioClock {
       }
     }
 
+    // W3C Web Audio API standard: 8-second lookahead window to prevent main-thread lag & memory spikes
+    const LOOKAHEAD_WINDOW = 8.0;
+
     for (const track of tracks) {
       if (track.isMuted) continue;
 
@@ -224,12 +231,26 @@ export class MasterAudioClock {
         }
         const clipEnd = clip.startAt + clip.duration;
 
-        // Clip is either currently active or starts shortly in the future
-        if (clipEnd > fromTimelineTime) {
-          this.scheduleSingleClip(clip, fromTimelineTime, now, isSpeechActive);
+        // Clip is active now OR starts within the lookahead window
+        if (clipEnd > fromTimelineTime && clip.startAt < fromTimelineTime + LOOKAHEAD_WINDOW) {
+          if (!this.scheduledClipIds.has(clip.id)) {
+            this.scheduledClipIds.add(clip.id);
+            this.scheduleSingleClip(clip, fromTimelineTime, now, isSpeechActive);
+          }
         }
       }
     }
+  }
+
+  /**
+   * Periodically check and schedule clips entering the lookahead window during playback.
+   */
+  public checkLookahead(timelineTime: number, tracks: TimelineTrack[]) {
+    if (!this.isPlaying || !this.ctx) return;
+    const now = this.ctx.currentTime;
+    if (now - this.lastLookaheadCheckTime < 0.5) return;
+    this.lastLookaheadCheckTime = now;
+    this.scheduleClips(timelineTime, tracks);
   }
 
   private async scheduleSingleClip(
@@ -311,6 +332,7 @@ export class MasterAudioClock {
             gainNode.disconnect();
           } catch (_) {}
           this.activeSources.delete(nodeKey);
+          this.scheduledClipIds.delete(clip.id);
         };
       }
     } catch (err) {
@@ -322,6 +344,7 @@ export class MasterAudioClock {
    * Stops all active sources with a 4ms micro-fade out to prevent clicks.
    */
   private stopActiveSources() {
+    this.scheduledClipIds.clear();
     if (!this.ctx) return;
     const now = this.ctx.currentTime;
     const fadeOutDuration = 0.004;
