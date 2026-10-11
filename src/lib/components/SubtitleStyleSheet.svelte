@@ -112,7 +112,7 @@
       Hazır Stil Şablonları (Presets)
     </span>
     <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
-      {#each presets as p}
+      {#each presets as p (p.id)}
         {@const isSelected = editor.globalSubtitleStyle.preset === p.id}
         <button
           onclick={() => editor.setSubtitlePreset(p.id)}
@@ -186,7 +186,7 @@
     <div class="space-y-1 pt-1">
       <span class="text-xs text-neutral-400">Animasyon Türü</span>
       <div class="grid grid-cols-2 sm:grid-cols-3 gap-1.5 pt-1">
-        {#each animations as anim}
+        {#each animations as anim (anim.id)}
           <button
             onclick={() => editor.updateGlobalSubtitleStyle({ animation: anim.id })}
             class="py-1.5 px-2 rounded-lg border text-[11px] font-medium transition-all {editor.globalSubtitleStyle.animation === anim.id ? 'bg-purple-600 border-purple-400 text-white' : 'bg-neutral-800 border-white/5 text-neutral-300 hover:bg-neutral-750'}"
@@ -203,7 +203,7 @@
         <Palette size={12} /> Renk Paleti
       </span>
       <div class="flex items-center gap-2 pt-1">
-        {#each colorPalettes as col}
+        {#each colorPalettes as col (col.name)}
           <button
             onclick={() => editor.updateGlobalSubtitleStyle({ 
               textColor: col.text, 

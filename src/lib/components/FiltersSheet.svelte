@@ -307,7 +307,7 @@
     {:else}
       <!-- Presets Grid / Horizontal Scroll for Mobile -->
       <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
-      {#each filteredPresets as preset}
+      {#each filteredPresets as preset (preset.id)}
         {@const isCurrent = selectedClip?.colorGrading?.lut === preset.grading.lut}
         <button
           onclick={() => applyPreset(preset.id)}

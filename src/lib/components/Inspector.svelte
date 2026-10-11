@@ -97,7 +97,7 @@
           <span class="font-mono text-amber-400 font-bold">{selectedClip.speed ?? 1}x</span>
         </div>
         <div class="grid grid-cols-4 gap-1.5">
-          {#each [0.5, 1, 1.5, 2] as spd}
+          {#each [0.5, 1, 1.5, 2] as spd (spd)}
             <button
               onclick={() => editor.setClipSpeed(selectedClip.id, spd)}
               class="py-1.5 text-xs rounded-xl font-mono font-semibold transition-all {(selectedClip.speed ?? 1) === spd && !selectedClip.speedCurve ? 'bg-amber-400 text-neutral-950 shadow-[0_0_12px_rgba(251,191,36,0.35)] font-bold' : 'bg-neutral-950/70 text-neutral-300 border border-white/5 hover:border-white/20'}"

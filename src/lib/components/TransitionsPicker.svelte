@@ -134,7 +134,7 @@
 
   <!-- Transitions Grid -->
   <div class="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
-    {#each availableTransitions as t}
+    {#each availableTransitions as t (t.id)}
       {@const isSelected = currentTransitionType === t.id}
       <button
         onclick={() => selectTransition(t.id)}

@@ -1020,7 +1020,7 @@
         onpointerdown={handleRulerPointerDown}
       >
         <div class="relative w-full h-full pointer-events-none" style="transform: translate3d(-{editor.scrollX}px, 0, 0)">
-          {#each rulerTicks as tick}
+          {#each rulerTicks as tick (tick.left)}
             {#if tick.isMajor}
               <div 
                 class="absolute top-1 font-mono text-[10px] text-neutral-300 font-semibold whitespace-nowrap select-none pointer-events-none"
@@ -1042,7 +1042,7 @@
 
           <!-- Beat Markers along ruler -->
           {#if editor.beatMarkers.length > 0}
-            {#each editor.beatMarkers as marker}
+            {#each editor.beatMarkers as marker (marker.time)}
               <div 
                 class="absolute bottom-0 w-1.5 h-3 -translate-x-1/2 flex flex-col items-center pointer-events-none z-10"
                 style="left: {marker.time * editor.zoom}px;"
@@ -1297,7 +1297,7 @@
 
       <!-- VAD Silences (Context-Aware) -->
       {#if clip.vadSilences}
-        {#each clip.vadSilences as silence}
+        {#each clip.vadSilences as silence (silence.start)}
           {@const silenceStart = Math.max(0, silence.start - clip.sourceOffset)}
           {@const silenceEnd = Math.min(clip.duration, silence.end - clip.sourceOffset)}
           {#if silenceEnd > 0 && silenceStart < clip.duration && silenceEnd > silenceStart}
@@ -1313,9 +1313,9 @@
 
       <!-- Whisper Transcripts (Context-Aware) -->
       {#if clip.subtitles}
-        {#each clip.subtitles as sub}
+        {#each clip.subtitles as sub (sub.start)}
           {#if sub.words}
-            {#each sub.words as word}
+            {#each sub.words as word, wIdx (wIdx)}
               {@const wordStart = Math.max(0, word.start - clip.sourceOffset)}
               {@const wordEnd = Math.min(clip.duration, word.end - clip.sourceOffset)}
               {#if wordEnd > 0 && wordStart < clip.duration && wordEnd > wordStart}

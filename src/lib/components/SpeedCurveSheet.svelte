@@ -28,7 +28,7 @@
       activePreset = selectedClip.speedCurve?.preset || 'none';
       keepPitch = selectedClip.speedCurve?.keepPitch ?? true;
       if (selectedClip.speedCurve?.points && selectedClip.speedCurve.points.length > 0) {
-        points = JSON.parse(JSON.stringify(selectedClip.speedCurve.points));
+        points = structuredClone(selectedClip.speedCurve.points);
       }
     }
   });
@@ -188,7 +188,7 @@
         />
 
         <!-- Control Point Knobs -->
-        {#each points as pt, idx}
+        {#each points as pt, idx (idx)}
           {@const cx = getX(pt.time)}
           {@const cy = getY(pt.speed)}
           {@const isSelected = idx === selectedPointIndex}
@@ -255,7 +255,7 @@
           <span class="text-[10px] text-neutral-400">1.0x standart hız</span>
         </button>
 
-        {#each SPEED_CURVE_PRESETS as preset}
+        {#each SPEED_CURVE_PRESETS as preset (preset.id)}
           {@const isSelected = activePreset === preset.id}
           <button
             onclick={() => selectPreset(preset.id)}

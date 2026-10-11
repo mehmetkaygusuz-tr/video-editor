@@ -482,7 +482,7 @@
                 bind:value={selectedVoice}
                 class="w-full px-2.5 py-1.5 rounded-lg bg-neutral-950 border border-neutral-800 text-xs text-white focus:outline-none focus:border-blue-500"
               >
-                {#each voices as voice}
+                {#each voices as voice (voice.id)}
                   <option value={voice.id}>{voice.name}</option>
                 {/each}
               </select>

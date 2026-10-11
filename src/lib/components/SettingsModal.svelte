@@ -167,7 +167,7 @@
             <div class="space-y-2.5">
               <span class="text-xs font-semibold text-neutral-300">Hazır Çözünürlük Profilleri:</span>
               <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
-                {#each resolutionPresets as preset}
+                {#each resolutionPresets as preset (preset.id)}
                   <button
                     onclick={() => editor.updateSettings({ resolutionPreset: preset.id as any })}
                     class="p-3.5 rounded-xl border text-left transition-all cursor-pointer {editor.settings.resolutionPreset === preset.id ? 'bg-blue-950/60 border-blue-500 text-white shadow-md' : 'bg-neutral-900/60 border-white/5 text-neutral-400 hover:border-white/20'}"
@@ -188,7 +188,7 @@
             <div class="space-y-2.5 pt-4 border-t border-white/10">
               <span class="text-xs font-semibold text-neutral-300">Proje Kare Hızı (FPS):</span>
               <div class="grid grid-cols-5 gap-2">
-                {#each fpsOptions as fps}
+                {#each fpsOptions as fps (fps)}
                   <button
                     onclick={() => editor.updateSettings({ fps })}
                     class="py-2.5 rounded-xl text-xs font-mono font-medium transition-colors cursor-pointer {editor.projectFps === fps ? 'bg-blue-600 text-white font-bold shadow-md' : 'bg-neutral-900 border border-white/5 text-neutral-400 hover:text-white'}"
@@ -290,7 +290,7 @@
 
               {#if vramModels.length > 0}
                 <div class="space-y-1">
-                  {#each vramModels as model}
+                  {#each vramModels as model, idx (idx)}
                     <div class="text-[11px] font-mono text-neutral-400 bg-neutral-950 px-2.5 py-1.5 rounded border border-white/5 flex items-center gap-2">
                       <div class="w-1.5 h-1.5 rounded-full bg-purple-400"></div>
                       <span>{model}</span>
@@ -365,7 +365,7 @@
 
             <!-- Themes List -->
             <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {#each themes as t}
+              {#each themes as t (t.id)}
                 <button
                   onclick={() => editor.setTheme(t.id)}
                   class="p-4 rounded-2xl border text-left transition-all cursor-pointer flex flex-col justify-between {editor.activeTheme === t.id ? 'border-amber-500 bg-amber-950/20 shadow-lg shadow-amber-950/20' : 'border-white/5 bg-neutral-900 hover:border-white/20'}"

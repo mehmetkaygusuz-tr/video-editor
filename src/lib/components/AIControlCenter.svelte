@@ -240,7 +240,7 @@
                     bind:value={selectedVoice}
                     class="w-full px-3 py-2 rounded-lg bg-neutral-950 border border-neutral-800 text-xs text-white focus:outline-none focus:border-blue-500 transition-colors"
                   >
-                    {#each voices as v}
+                    {#each voices as v (v.id)}
                       <option value={v.id}>{v.name}</option>
                     {/each}
                   </select>
@@ -364,7 +364,7 @@
                 {#if aiService.logs.length === 0}
                   <div class="text-neutral-600">Henüz bir günlük kaydı yok.</div>
                 {:else}
-                  {#each aiService.logs as log}
+                  {#each aiService.logs as log, i (i)}
                     <div class="flex items-center gap-2 {log.level === 'error' ? 'text-red-400' : log.level === 'warn' ? 'text-amber-400' : 'text-neutral-400'}">
                       <span class="text-neutral-600">[{new Date(log.timestamp).toLocaleTimeString()}]</span>
                       <span>{log.message}</span>

@@ -125,7 +125,7 @@
         <span>Hız:</span>
       </div>
       <div class="flex items-center gap-1.5 overflow-x-auto">
-        {#each speeds as spd}
+        {#each speeds as spd (spd)}
           <button 
             onclick={() => handleSpeedSelect(spd)}
             class="px-3 py-1 rounded-full text-xs font-mono font-medium transition-colors {(selectedClip.speed ?? 1) === spd && !selectedClip.speedCurve ? 'bg-amber-400 text-neutral-950 font-bold' : 'bg-neutral-800 text-neutral-300 hover:bg-neutral-700'}"

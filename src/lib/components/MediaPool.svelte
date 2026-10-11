@@ -4,7 +4,7 @@
   import { saveFileToOPFS } from '../opfs';
   import { Plus, Film, Music, Image as ImageIcon, Upload, Wand2, Trash2 } from '@lucide/svelte';
 
-  let fileInput: HTMLInputElement;
+  let fileInput = $state<HTMLInputElement>();
 
   async function handleFileUpload(event: Event) {
     const target = event.target as HTMLInputElement;
@@ -153,7 +153,7 @@
     <span class="text-sm font-semibold text-neutral-200">Medya Havuzu</span>
     <button 
       class="h-7 px-2.5 rounded bg-neutral-800 hover:bg-neutral-700 flex items-center gap-1.5 text-xs text-neutral-300 hover:text-white transition-colors focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-none"
-      onclick={() => fileInput.click()}
+      onclick={() => fileInput?.click()}
       aria-label="Cihazdan Medya İçe Aktar"
       title="Medya Yükle (Video, Ses, Resim)"
     >
