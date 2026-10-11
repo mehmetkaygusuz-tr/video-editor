@@ -20,3 +20,4 @@ not_found_handling = "single-page-application"
 
 [vars]
 SUBPATH_PREFIX = "/video-editor"
+

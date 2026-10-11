@@ -71,3 +71,4 @@ Eğer frontend halihazırda Cloudflare Pages, R2 veya başka bir sunucuda (Verce
 2. **Kayıp Arayüz Özelliği Eklendi:**
    - Modernize edilen `OklabColorWheel` (Oklab Renk Çarkı) doğrudan Filtreler / Renk sekmesine entegre edildi.
    - AI Üretim Merkezi modalı (Whisper, Silero, Kokoro TTS, Lisanslar) doğrudan arayüze ve AI Direktöre bağlandı.
+
