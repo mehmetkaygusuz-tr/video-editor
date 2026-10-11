@@ -155,18 +155,11 @@
           { label: '🧹 Dip Gürültü Temizle', cmd: 'Dip gürültüyü temizle' },
           { label: '🔥 Viral Kanca', cmd: 'Viral kanca üret' },
           { label: '📤 4K Dışa Aktar', cmd: 'Dışa aktar' },
-          { label: '🔇 Sessize Al', cmd: 'Sessize al' },
-          { label: '🤖 AI Kontrol Merkezi', cmd: 'AI kontrol merkezini aç' }
+          { label: '🔇 Sessize Al', cmd: 'Sessize al' }
         ] as chip}
           <button
             type="button"
             onclick={() => {
-              if (chip.cmd === 'AI kontrol merkezini aç') {
-                aiService.isPanelOpen = true;
-                editor.isCommandPaletteOpen = false;
-                editor.triggerHaptic('light');
-                return;
-              }
               prompt = chip.cmd;
               handleSubmit();
             }}

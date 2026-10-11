@@ -21,13 +21,12 @@
   import Omnibar from './lib/components/Omnibar.svelte';
   import SettingsModal from './lib/components/SettingsModal.svelte';
   import FiltersSheet from './lib/components/FiltersSheet.svelte';
-  import AIControlCenter from './lib/components/AIControlCenter.svelte';
   import { 
     Sparkles, Download, Play, Pause, 
     SkipBack, SkipForward, Image as ImageIcon, Scissors, 
     Trash as Trash2, X, Undo2, Redo2, FastForward, Volume2, Layers, Crop, FolderClosed,
     SlidersHorizontal as Sliders, Monitor, CircleQuestionMark as HelpCircle, RefreshCw,
-    Maximize2, Minimize2, Type, Zap, Cpu, RotateCcw, Magnet, ZoomIn, ZoomOut, Music,
+    Maximize2, Minimize2, Type, Zap, RotateCcw, Magnet, ZoomIn, ZoomOut, Music,
     ChevronDown, ChevronUp, ChevronLeft, ChevronRight
   } from '@lucide/svelte';
 
@@ -523,7 +522,6 @@
         </button>
         <div class="flex flex-col">
           <div class="flex items-center gap-1.5">
-            <span class="font-extrabold text-xs sm:text-sm tracking-tight text-white font-mono">TOOLX</span>
             <span class="text-[9px] font-mono px-1.5 py-0.2 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 font-bold uppercase tracking-wider">2026 PRO</span>
           </div>
           <span class="text-[9px] font-mono text-neutral-400 hidden xs:inline tracking-tight">Yerel WebGPU Stüdyo</span>
@@ -563,7 +561,7 @@
           <button
             onclick={() => editor.isCommandPaletteOpen = true}
             class="flex items-center gap-2.5 px-3.5 py-1.5 rounded-full spatial-glass hover:spatial-glass-active transition-all duration-200 group cursor-pointer dynamic-island-glow"
-            title="AI Stüdyo Direktörü (⌘K veya Ctrl+K)"
+            title="AI Stüdyo Direktörü (Ctrl+K)"
           >
             <div class="w-6 h-6 rounded-full bg-gradient-to-tr from-purple-600 to-cyan-500 flex items-center justify-center text-white shadow-sm group-hover:scale-105 transition-transform">
               <Sparkles size={12} class="animate-pulse" />
@@ -573,17 +571,8 @@
               <span class="text-neutral-500 text-[11px] hidden xl:inline">"Sessizlikleri sil", "Altyazı üret", "Ritim kesimi"</span>
             </div>
             <div class="flex items-center gap-1 pl-1">
-              <kbd class="px-1.5 py-0.5 text-[9px] font-mono font-semibold bg-white/10 border border-white/10 rounded text-neutral-300 shadow-sm">⌘K</kbd>
+              <kbd class="px-1.5 py-0.5 text-[9px] font-mono font-semibold bg-white/10 border border-white/10 rounded text-neutral-300 shadow-sm">Ctrl + K</kbd>
             </div>
-          </button>
-
-          <button
-            onclick={() => { aiService.isPanelOpen = true; editor.triggerHaptic('light'); }}
-            class="hidden lg:flex items-center gap-1 px-2.5 py-1.5 rounded-full spatial-glass hover:spatial-glass-active text-purple-300 hover:text-white text-xs transition-all cursor-pointer dynamic-island-glow"
-            title="Yapay Zeka Üretim Merkezi (Yerel Modeller & Lisanslar)"
-          >
-            <Cpu size={12} class="text-purple-400" />
-            <span class="text-[11px] font-medium">Model Hub</span>
           </button>
         </div>
       {/if}
@@ -1057,9 +1046,7 @@
   <ExportModal bind:isOpen={editor.isExportOpen} />
   <!-- Studio Settings Modal -->
   <SettingsModal />
-  <!-- AI Control Center & Model Hub Modal -->
-  <AIControlCenter />
-  <!-- Global Command Palette Modal (Cmd+K) -->
+  <!-- Global Command Palette Modal (Ctrl+K) -->
   <Omnibar />
 </main>
 

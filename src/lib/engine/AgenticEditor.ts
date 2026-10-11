@@ -824,8 +824,9 @@ export class AgenticEditor {
         }
 
         case 'OPEN_AI_CENTER': {
-          aiService.isPanelOpen = true;
-          result = { success: true, message: 'AI Üretim Merkezi açıldı.' };
+          editor.activeSidebarTab = 'ai';
+          editor.mobileWorkspace = 'ai';
+          result = { success: true, message: 'AI Kurgu sekmesi açıldı.' };
           break;
         }
 

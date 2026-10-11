@@ -3,20 +3,13 @@
   import { aiService } from '../engine/aiService.svelte';
   import { 
     Scissors, Trash2, Volume2, FastForward, Sparkles, Layers, 
-    Crop, FolderClosed, Music, Type, X, ChevronUp, ChevronDown, ChevronLeft, ChevronRight,
+    Crop, FolderClosed, Music, Type, X, ChevronUp, ChevronDown,
     SlidersHorizontal, Copy, RefreshCw, ZoomIn, Eye, EyeOff, Shuffle,
     Gauge, Sliders, Palette, Zap, Undo2, Redo2, Magnet, Play, Pause
   } from '@lucide/svelte';
 
   let selectedClip = $derived(editor.getSelectedClip());
   let scrollContainerRef = $state<HTMLDivElement | null>(null);
-
-  function scrollHorizontal(delta: number) {
-    if (scrollContainerRef) {
-      scrollContainerRef.scrollBy({ left: delta, behavior: 'smooth' });
-      editor.triggerHaptic('light');
-    }
-  }
 
   // Quick speed options
   const speeds = [0.5, 1, 1.5, 2];
@@ -157,20 +150,10 @@
     </div>
   {/if}
 
-  <!-- 3. Main Horizontal Thumb-Zone Strip with Left/Right Arrow Navigation -->
+  <!-- 3. Main Horizontal Thumb-Zone Strip -->
   <div 
-    class="w-full max-w-3xl flex items-center justify-between px-1.5 sm:px-3 py-1.5 overflow-hidden relative gap-1"
+    class="w-full max-w-3xl flex items-center justify-between px-2 sm:px-4 py-1.5 overflow-hidden relative"
   >
-    <!-- Left Scroll Arrow -->
-    <button
-      type="button"
-      onclick={() => scrollHorizontal(-130)}
-      class="flex-none p-1.5 rounded-xl bg-neutral-900/80 hover:bg-neutral-800 text-neutral-400 hover:text-white border border-white/5 active:scale-90 transition-all z-10 shadow-sm cursor-pointer"
-      title="Sola Kaydır"
-    >
-      <ChevronLeft size={16} />
-    </button>
-
     {#if selectedClip && editor.mobileWorkspace === 'timeline'}
       <!-- MODE A: CLIP SELECTED ACTIONS (Contextual Editing) -->
       <div 
@@ -436,15 +419,5 @@
         </button>
       </div>
     {/if}
-
-    <!-- Right Scroll Arrow -->
-    <button
-      type="button"
-      onclick={() => scrollHorizontal(130)}
-      class="flex-none p-1.5 rounded-xl bg-neutral-900/80 hover:bg-neutral-800 text-neutral-400 hover:text-white border border-white/5 active:scale-90 transition-all z-10 shadow-sm cursor-pointer"
-      title="Sağa Kaydır"
-    >
-      <ChevronRight size={16} />
-    </button>
   </div>
 </nav>
