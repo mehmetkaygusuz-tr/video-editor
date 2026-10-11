@@ -376,6 +376,18 @@
     const topClip = activeClips[0];
     const bottomClip = activeClips[1];
 
+    if (!topClip) {
+      if (canvasRef) {
+        lastVideoSeekTime = -1;
+        const ctx = canvasRef.getContext('2d');
+        if (ctx) {
+          ctx.fillStyle = '#090a0f';
+          ctx.fillRect(0, 0, canvasRef.width, canvasRef.height);
+        }
+      }
+      return;
+    }
+
     if (topClip) {
       const speed1 = topClip.speed ?? 1.0;
       const targetTime1 = (topClip.sourceOffset || 0) + (videoPTS - topClip.startAt) * speed1;
@@ -395,7 +407,7 @@
         }
       }
 
-      if (editor.renderFrameDirty || Math.abs(targetTime1 - lastVideoSeekTime) >= (isPlaying ? 0.025 : 0.002) || lastVideoSeekTime < 0) {
+      if (editor.renderFrameDirty || Math.abs(targetTime1 - lastVideoSeekTime) >= (isPlaying ? 0.025 : 0.0005) || lastVideoSeekTime < 0) {
         editor.renderFrameDirty = false;
         const asset1 = editor.assets.find(a => a.id === topClip.assetId) || editor.assets.find(a => a.name === topClip.name);
         const asset2 = bottomClip ? (editor.assets.find(a => a.id === bottomClip.assetId) || editor.assets.find(a => a.name === bottomClip.name)) : null;
@@ -439,7 +451,7 @@
               lastVideoSeekTime = targetTime1;
               const clip1Info = { file: file1, time: targetTime1, grading: topClip.colorGrading };
               const clip2Info = (file2 && bottomClip) ? { file: file2, time: targetTime2, grading: bottomClip.colorGrading } : null;
-              const seekMode = isPlaying ? 'exact' : (editor.isScrubbing && editor.scrubbingMode === 'adaptive' ? 'fast_keyframe' : editor.scrubbingMode);
+              const seekMode = 'exact' as const;
               await engine.seekFrameWithTransition(clip1Info, clip2Info, transition, { mode: seekMode });
               if (isPlaying) {
                 masterAudioClock.recordVideoDrift(videoPTS);
@@ -457,6 +469,8 @@
       }
     }
   }
+
+  let lastRenderedPlayhead = -1;
 
   function playLoop() {
     const now = performance.now();
@@ -477,8 +491,11 @@
       seekAndRenderVideoFrame(videoPTS, true);
     } else {
       editor.updateAudioClockTelemetry(masterAudioClock.getTelemetry());
-      // Render frame when paused so canvas displays image accurately without needing to play
-      seekAndRenderVideoFrame(editor.playhead, false);
+      // Render frame when paused only when playhead changed or frame is dirty
+      if (editor.renderFrameDirty || Math.abs(editor.playhead - lastRenderedPlayhead) > 0.0005) {
+        lastRenderedPlayhead = editor.playhead;
+        seekAndRenderVideoFrame(editor.playhead, false);
+      }
     }
     
     playLoopId = requestAnimationFrame(playLoop);

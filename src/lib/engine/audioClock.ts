@@ -383,32 +383,36 @@ export class MasterAudioClock {
             source: new BlobSource(file),
             formats: ALL_FORMATS
           });
-          const audioTrack = await input.getPrimaryAudioTrack();
-          if (audioTrack) {
-            const sink = new AudioBufferSink(audioTrack);
-            const startSec = clip.sourceOffset || 0;
-            const endSec = startSec + clip.duration + 1; // +1s buffer
-            const wrappedBuffers: AudioBuffer[] = [];
-            
-            // Query buffer for the required clip range
-            if (typeof (sink as any).buffers === 'function') {
-              for await (const wrapped of (sink as any).buffers(startSec, endSec)) {
-                if (wrapped && wrapped.buffer) {
-                  wrappedBuffers.push(wrapped.buffer);
-                } else if (wrapped instanceof AudioBuffer) {
-                  wrappedBuffers.push(wrapped);
+          try {
+            const audioTrack = await input.getPrimaryAudioTrack();
+            if (audioTrack) {
+              const sink = new AudioBufferSink(audioTrack);
+              const startSec = clip.sourceOffset || 0;
+              const endSec = startSec + clip.duration + 1; // +1s buffer
+              const wrappedBuffers: AudioBuffer[] = [];
+              
+              // Query buffer for the required clip range
+              if (typeof (sink as any).buffers === 'function') {
+                for await (const wrapped of (sink as any).buffers(startSec, endSec)) {
+                  if (wrapped && wrapped.buffer) {
+                    wrappedBuffers.push(wrapped.buffer);
+                  } else if (wrapped instanceof AudioBuffer) {
+                    wrappedBuffers.push(wrapped);
+                  }
                 }
+              } else if (typeof sink.getBuffer === 'function') {
+                const buf = await sink.getBuffer(startSec);
+                if (buf) wrappedBuffers.push(buf as any);
               }
-            } else if (typeof sink.getBuffer === 'function') {
-              const buf = await sink.getBuffer(startSec);
-              if (buf) wrappedBuffers.push(buf as any);
-            }
 
-            if (wrappedBuffers.length > 0) {
-              const merged = this.mergeAudioBuffers(ctx, wrappedBuffers);
-              this.audioBufferCache.set(cacheKey, merged);
-              return merged;
+              if (wrappedBuffers.length > 0) {
+                const merged = this.mergeAudioBuffers(ctx, wrappedBuffers);
+                this.audioBufferCache.set(cacheKey, merged);
+                return merged;
+              }
             }
+          } finally {
+            try { input[Symbol.dispose]?.(); } catch (_) {}
           }
         } catch (mbErr) {
           // Fallback to standard Web Audio decodeAudioData if container is audio-only or unsupported

@@ -215,9 +215,7 @@
 
     // Auto-preview the clip frame when clicked/dragged
     if (clip.assetId) {
-      const timeInClip = Math.max(0, editor.playhead - clip.startAt);
-      const sourceTime = (clip.sourceOffset || 0) + timeInClip;
-      triggerSeek(clip.assetId, sourceTime);
+      editor.renderFrameDirty = true;
     }
   }
 
@@ -255,28 +253,6 @@
       editor.scrollY = Math.max(0, Math.min(maxScrollY, editor.scrollY + e.deltaY));
     }
   }
-
-  // Scrubbing seek reaction for playhead updates when paused
-  let lastManualPlayhead = -1;
-  $effect(() => {
-    const currentHead = editor.playhead;
-    if (!editor.isPlaying && Math.abs(currentHead - lastManualPlayhead) > 0.001) {
-      lastManualPlayhead = currentHead;
-      for (const track of editor.tracks) {
-        for (const clip of track.clips) {
-          if (currentHead >= clip.startAt && currentHead <= clip.startAt + clip.duration) {
-            if (clip.assetId) {
-              const speedMultiplier = clip.speed ?? 1.0;
-              const timeInClip = currentHead - clip.startAt;
-              const sourceTime = (clip.sourceOffset || 0) + (timeInClip * speedMultiplier);
-              triggerSeek(clip.assetId, sourceTime);
-            }
-            return;
-          }
-        }
-      }
-    }
-  });
 
   function handleGlobalKeyDown(e: KeyboardEvent) {
     const target = e.target as HTMLElement | null;
@@ -340,26 +316,19 @@
       const x = e.clientX - rect.left;
       const y = e.clientY - rect.top;
 
-      // Touch pan
-      if (e.pointerType === 'touch' && (y >= RULER_HEIGHT || x <= effectiveHeaderWidth)) {
-          // Touch pan
-          isPanning = true;
-          isDraggingPlayhead = false;
-          lastPanX = e.clientX;
-          lastPanY = e.clientY;
-      } else if (e.button === 1 || (e.button === 0 && e.altKey)) {
-          // Mouse pan (middle click or alt+click)
-          isPanning = true;
-          isDraggingPlayhead = false;
-          lastPanX = e.clientX;
-          lastPanY = e.clientY;
-      } else if (e.button === 0 && x > effectiveHeaderWidth) {
-          // Scrub playhead anywhere on timeline background
-          isDraggingPlayhead = true;
-          editor.isScrubbing = true;
-          isPanning = false;
-          updatePlayhead(e.clientX);
-          scheduleSettleSeek();
+      if (e.button === 1 || (e.button === 0 && e.altKey)) {
+        // Mouse pan (middle click or alt+click)
+        isPanning = true;
+        isDraggingPlayhead = false;
+        lastPanX = e.clientX;
+        lastPanY = e.clientY;
+      } else if (x > effectiveHeaderWidth) {
+        // Scrub playhead anywhere on timeline background, tracks or ruler
+        isDraggingPlayhead = true;
+        editor.isScrubbing = true;
+        isPanning = false;
+        updatePlayhead(e.clientX);
+        scheduleSettleSeek();
       }
     } else if (activePointers.size === 2) {
       // Pinch to zoom started
@@ -382,55 +351,10 @@
     clearTimeout(settleSeekTimer);
     settleSeekTimer = setTimeout(() => {
       if (!editor.isPlaying) {
-        seekCurrentPlayheadExact();
+        editor.renderFrameDirty = true;
+        masterAudioClock.seek(editor.playhead, editor.tracks);
       }
-    }, 80);
-  }
-
-  function seekCurrentPlayheadExact() {
-    const currentHead = editor.playhead;
-    for (const track of editor.tracks) {
-      for (const clip of track.clips) {
-        if (currentHead >= clip.startAt && currentHead <= clip.startAt + clip.duration) {
-          if (clip.assetId) {
-            const speedMultiplier = clip.speed ?? 1.0;
-            const timeInClip = currentHead - clip.startAt;
-            const sourceTime = (clip.sourceOffset || 0) + (timeInClip * speedMultiplier);
-            triggerSeek(clip.assetId, sourceTime, { mode: 'exact' });
-          }
-          return;
-        }
-      }
-    }
-  }
-
-  async function triggerSeek(assetId: string, timeInSeconds: number, options?: SeekOptions) {
-    const asset = editor.assets.find(a => a.id === assetId);
-    if (!asset || asset.type !== 'video') return;
-    try {
-      let file: File | null | undefined = timelineFileCache.get(asset.name);
-      if (!file) {
-         file = await getFileFromOPFS(asset.name);
-         if (file) timelineFileCache.set(asset.name, file);
-      }
-      if (!file && asset.blobUrl) {
-        try {
-          const res = await fetch(asset.blobUrl);
-          const blob = await res.blob();
-          file = new File([blob], asset.name, { type: 'video/mp4' });
-          timelineFileCache.set(asset.name, file);
-        } catch (_) {}
-      }
-      if (file) {
-        const seekMode = options?.mode || (editor.isScrubbing && editor.scrubbingMode === 'adaptive' ? 'fast_keyframe' : editor.scrubbingMode);
-        await engine.seekFrame(file, timeInSeconds, undefined, { mode: seekMode });
-        window.dispatchEvent(new CustomEvent('editor:seek', { 
-            detail: { file, time: timeInSeconds } 
-        }));
-      }
-    } catch (e) {
-      console.error(e);
-    }
+    }, 40);
   }
 
   function handlePointerMove(e: PointerEvent) {
@@ -615,7 +539,7 @@
       }
       
       if (seekAssetId && seekTime >= 0) {
-         triggerSeek(seekAssetId, seekTime);
+         editor.renderFrameDirty = true;
       }
       return; // Skip normal panning
     }
@@ -628,12 +552,6 @@
         const dy = lastEvent.clientY - lastPanY;
         editor.scrollX = Math.max(0, editor.scrollX - dx);
         editor.scrollY = Math.max(0, editor.scrollY - dy);
-        
-        const containerWidth = container?.clientWidth || 1920;
-        if (containerWidth < 768) {
-           editor.playhead = (editor.scrollX + (containerWidth / 2)) / editor.zoom;
-        }
-        
         lastPanX = lastEvent.clientX;
         lastPanY = lastEvent.clientY;
       }
@@ -671,7 +589,7 @@
       if (isDraggingPlayhead) {
         editor.isScrubbing = false;
         masterAudioClock.seek(editor.playhead, editor.tracks);
-        seekCurrentPlayheadExact();
+        editor.renderFrameDirty = true;
       }
       isDraggingPlayhead = false;
       isPanning = false;
@@ -691,6 +609,14 @@
     if (!rect) return;
     const mouseX = clientX - rect.left - effectiveHeaderWidth;
     let newTime = Math.max(0, (mouseX + editor.scrollX) / editor.zoom);
+
+    // Auto-scroll when scrubbing near viewport edges
+    const edgeMargin = 35;
+    if (mouseX > (container?.clientWidth || 800) - effectiveHeaderWidth - edgeMargin) {
+      editor.scrollX = Math.max(0, editor.scrollX + 6);
+    } else if (mouseX < edgeMargin && editor.scrollX > 0) {
+      editor.scrollX = Math.max(0, editor.scrollX - 6);
+    }
     
     // Magnetic Snapping Logic
     const snapThreshold = 12 / editor.zoom; // 12 pixels snapping threshold
@@ -741,22 +667,7 @@
       lastSnapTime = -1;
     }
 
-    editor.playhead = newTime;
-    masterAudioClock.seek(newTime, editor.tracks);
-    
-    // Find the topmost clip at this playhead position
-    for (const track of editor.tracks) {
-      for (const clip of track.clips) {
-        if (editor.playhead >= clip.startAt && editor.playhead <= clip.startAt + clip.duration) {
-           if (clip.assetId) {
-              const timeInClip = editor.playhead - clip.startAt;
-              const sourceTime = clip.sourceOffset + timeInClip;
-              triggerSeek(clip.assetId, sourceTime);
-           }
-           return; // Found the clip
-        }
-      }
-    }
+    editor.playhead = Number(newTime.toFixed(3));
   }
 
   function handleDragOver(e: DragEvent) {

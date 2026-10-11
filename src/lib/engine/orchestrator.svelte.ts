@@ -58,16 +58,6 @@ export class EngineOrchestrator {
 
             this.setupMessageHandlers();
             this.probeDeviceCapabilities();
-
-            if (typeof window !== 'undefined' && !(window as any).__orchestratorSeekBound) {
-                (window as any).__orchestratorSeekBound = true;
-                window.addEventListener('editor:seek', (e: Event) => {
-                    const customEv = e as CustomEvent<{ file: File; time: number }>;
-                    if (customEv.detail?.file && typeof customEv.detail?.time === 'number') {
-                        this.seekFrame(customEv.detail.file, customEv.detail.time);
-                    }
-                });
-            }
         }
     }
 
@@ -283,6 +273,9 @@ export class EngineOrchestrator {
                         editor.updateDecoderTelemetry(decoder.telemetry);
                         return { type: 'frame', frame: res.frame };
                     }
+                    // If decoder is active, returning null means seek was superseded by a newer frame request.
+                    // Do not fall back to native video element as that would fight with WebCodecs.
+                    return null;
                 } catch (err) {
                     console.warn('[Orchestrator] Decoder seek error, trying native element:', err);
                 }

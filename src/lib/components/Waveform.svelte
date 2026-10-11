@@ -13,109 +13,93 @@
   }>();
 
   let canvasEl = $state<HTMLCanvasElement | undefined>();
-  let worker: Worker | null = null;
-  let hasTransferredControl = false;
+  let peaks = $state<Float32Array | null>(null);
+  let totalDuration = $state<number>(60);
   let resizeObserver: ResizeObserver | null = null;
 
+  function renderWaveform() {
+    if (!canvasEl || !peaks || peaks.length === 0) return;
+    const ctx = canvasEl.getContext('2d');
+    if (!ctx) return;
+
+    const width = canvasEl.clientWidth;
+    const height = canvasEl.clientHeight;
+    if (width <= 0 || height <= 0) return;
+
+    const dpr = Math.min(2, window.devicePixelRatio || 1);
+    if (canvasEl.width !== Math.floor(width * dpr) || canvasEl.height !== Math.floor(height * dpr)) {
+      canvasEl.width = Math.floor(width * dpr);
+      canvasEl.height = Math.floor(height * dpr);
+    }
+
+    ctx.save();
+    ctx.scale(dpr, dpr);
+    ctx.clearRect(0, 0, width, height);
+
+    const peaksPerSec = peaks.length / (totalDuration || 60);
+    const startPeak = Math.floor(sourceOffset * peaksPerSec);
+    const endPeak = Math.ceil((sourceOffset + duration) * peaksPerSec);
+
+    const safeStart = Math.max(0, startPeak);
+    const safeEnd = Math.min(peaks.length, endPeak);
+    const visibleCount = safeEnd - safeStart;
+
+    if (visibleCount > 0) {
+      const step = width / visibleCount;
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.4)';
+      
+      for (let i = 0; i < visibleCount; i++) {
+        const peakVal = peaks[safeStart + i];
+        const barH = Math.max(1, peakVal * height * 0.9);
+        const y = (height - barH) / 2;
+        ctx.fillRect(i * step, y, Math.max(0.5, step - 0.5), barH);
+      }
+    }
+
+    ctx.restore();
+  }
+
   $effect(() => {
-     // Re-trigger draw on the worker when reactive props change
-     // We use untrack to ensure we don't accidentally re-run on worker reference change
-     const currentZoom = zoom;
-     const currentOffset = sourceOffset;
-     const currentDur = duration;
-     
-     if (worker && canvasEl && hasTransferredControl) {
-        const width = canvasEl.clientWidth;
-        const height = canvasEl.clientHeight;
-        if (width > 0 && height > 0) {
-            worker.postMessage({
-              type: 'draw',
-              payload: {
-                sourceOffset: currentOffset,
-                duration: currentDur,
-                width,
-                height,
-                dpr: window.devicePixelRatio || 1
-              }
-            });
-        }
-     }
+    // Re-render when geometry or peaks change
+    const _z = zoom;
+    const _o = sourceOffset;
+    const _d = duration;
+    const _p = peaks;
+    if (canvasEl && peaks) {
+      renderWaveform();
+    }
   });
 
   onMount(async () => {
     if (!canvasEl) return;
-    
-    // 1. Setup Worker
-    worker = new Worker(new URL('../engine/workers/waveform.worker.ts', import.meta.url), { type: 'module' });
-    
-    // Transfer control
-    const offscreen = canvasEl.transferControlToOffscreen();
-    worker.postMessage({ type: 'init', payload: { offscreen } }, [offscreen]);
-    hasTransferredControl = true;
 
-    // Handle resize observation
-    resizeObserver = new ResizeObserver((entries) => {
-        if (!worker) return;
-        const entry = entries[0];
-        if (entry.contentRect.width > 0 && entry.contentRect.height > 0) {
-            worker.postMessage({
-              type: 'draw',
-              payload: {
-                sourceOffset,
-                duration,
-                width: entry.contentRect.width,
-                height: entry.contentRect.height,
-                dpr: window.devicePixelRatio || 1
-              }
-            });
-        }
+    resizeObserver = new ResizeObserver(() => {
+      renderWaveform();
     });
     resizeObserver.observe(canvasEl);
 
-    // 2. Fetch and generate audio data
     const asset = editor.assets.find(a => a.id === assetId);
     if (!asset || asset.type === 'image') return;
-    
+
     try {
-      const file = await getFileFromOPFS(asset.name);
-      if (file) {
-         // Create 2000 peaks to have enough resolution
-         const peaks = await generateWaveformPeaks(file, 2000);
-         const totalDuration = asset.duration || 60; 
-         
-         if (worker) {
-             worker.postMessage({
-               type: 'update_data',
-               payload: { peaks, totalDuration }
-             });
-             
-             // Initial draw trigger
-             if (canvasEl.clientWidth > 0) {
-                 worker.postMessage({
-                   type: 'draw',
-                   payload: {
-                     sourceOffset,
-                     duration,
-                     width: canvasEl.clientWidth,
-                     height: canvasEl.clientHeight,
-                     dpr: window.devicePixelRatio || 1
-                   }
-                 });
-             }
-         }
+      let file: File | null | undefined = editor.getCachedFile(asset.name);
+      if (!file) {
+        file = await getFileFromOPFS(asset.name);
       }
-    } catch(e) {
-      console.warn("Waveform generation failed", e);
+      if (file) {
+        totalDuration = asset.duration || 60;
+        peaks = await generateWaveformPeaks(file, 1000);
+        renderWaveform();
+      }
+    } catch (e) {
+      console.warn('[Waveform] Generation error:', e);
     }
   });
-  
+
   onDestroy(() => {
     if (resizeObserver && canvasEl) {
-        resizeObserver.unobserve(canvasEl);
-        resizeObserver.disconnect();
-    }
-    if (worker) {
-        worker.terminate();
+      resizeObserver.unobserve(canvasEl);
+      resizeObserver.disconnect();
     }
   });
 </script>

@@ -39,9 +39,11 @@ export class VideoDecoderWrapper implements IDecoderEngine {
   private _keyframeTimestamps: number[] = [];
   private _keyframeIndexingPromise: Promise<void> | null = null;
   
-  // Frame Cache (LRU for decoded keyframes to guarantee 0ms latency on repeated GOP hits)
+  // Frame Cache (LRU for decoded keyframes and recent exact frames for 0ms latency on repeated hits)
   private _keyframeCache = new Map<number, VideoFrame>();
   private readonly MAX_CACHE_FRAMES = 16;
+  private _recentFrameCache = new Map<number, VideoFrame>();
+  private readonly MAX_RECENT_FRAMES = 12;
   
   // Telemetry
   private _lastPTS = 0;
@@ -134,6 +136,9 @@ export class VideoDecoderWrapper implements IDecoderEngine {
         timestamps.push(cur.timestamp);
         cur = await this.packetSink.getNextKeyPacket(cur, { metadataOnly: true });
         safetyCount++;
+        if (safetyCount % 50 === 0) {
+          await new Promise(r => setTimeout(r, 0));
+        }
       }
 
       if (timestamps.length > 0) {
@@ -245,6 +250,26 @@ export class VideoDecoderWrapper implements IDecoderEngine {
       };
     }
 
+    // Cache check for recent exact frame hits (instant 0ms scrubbing response)
+    if (!isFastKeyframeMode) {
+      for (const [pts, cachedFrame] of this._recentFrameCache.entries()) {
+        if (Math.abs(pts - targetTime) < 0.015) {
+          const durationMs = performance.now() - tStart;
+          this._lastPTS = pts;
+          this._lastIsKeyframe = false;
+          this._lastMode = 'exact';
+          this._lastDurationMs = durationMs;
+          return {
+            frame: cachedFrame.clone(),
+            pts,
+            isKeyframe: false,
+            mode: 'exact',
+            decodeDurationMs: durationMs
+          };
+        }
+      }
+    }
+
     try {
       // For fast_keyframe, we decode directly at the nearest keyframe PTS
       const requestPTS = isFastKeyframeMode ? nearestKey : targetTime;
@@ -296,6 +321,19 @@ export class VideoDecoderWrapper implements IDecoderEngine {
         this._keyframeCache.set(nearestKey, frame.clone());
       }
 
+      // Cache recent exact frames for 0ms scrubbing
+      if (!isFastKeyframeMode) {
+        if (this._recentFrameCache.size >= this.MAX_RECENT_FRAMES) {
+          const oldest = this._recentFrameCache.keys().next().value;
+          if (oldest !== undefined) {
+            const evicted = this._recentFrameCache.get(oldest);
+            try { evicted?.close(); } catch (_) {}
+            this._recentFrameCache.delete(oldest);
+          }
+        }
+        this._recentFrameCache.set(samplePTS, frame.clone());
+      }
+
       this._lastPTS = samplePTS;
       this._lastIsKeyframe = isKey;
       this._lastMode = isFastKeyframeMode ? 'fast_keyframe' : 'exact';
@@ -334,6 +372,11 @@ export class VideoDecoderWrapper implements IDecoderEngine {
       try { frame.close(); } catch {}
     }
     this._keyframeCache.clear();
+
+    for (const frame of this._recentFrameCache.values()) {
+      try { frame.close(); } catch {}
+    }
+    this._recentFrameCache.clear();
 
     this.sink = null;
     this.packetSink = null;
