@@ -14,10 +14,9 @@
     "skipLibCheck": true,
     "allowSyntheticDefaultImports": true,
     "forceConsistentCasingInFileNames": true,
-    "baseUrl": ".",
     "types": ["@webgpu/types"],
     "paths": {
-      "$lib/*": ["src/lib/*"]
+      "$lib/*": ["./src/lib/*"]
     }
   },
   "include": ["src/**/*.d.ts", "src/**/*.ts", "src/**/*.js", "src/**/*.svelte"]
