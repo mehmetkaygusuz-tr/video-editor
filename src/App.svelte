@@ -39,14 +39,9 @@
     }
     // Mobile docked panels: Filters, Media, AI, Templates, Captions
     if (editor.mobileWorkspace !== 'timeline') {
-      return editor.isBottomPanelExpanded
-        ? 'h-[50vh] lg:h-[45vh] min-h-[320px] opacity-100 flex flex-col'
-        : 'h-[34vh] lg:h-[30vh] min-h-[220px] opacity-100 flex flex-col';
+      return 'h-[34vh] lg:h-[30vh] min-h-[220px] opacity-100 flex flex-col';
     }
-    // Timeline mode: on mobile, provide stable generous room (expandable when filled), on desktop adapt to tracks
-    if (editor.isBottomPanelExpanded) {
-      return 'h-[46vh] lg:h-[36vh] min-h-[280px] opacity-100 flex flex-col';
-    }
+    // Timeline mode: on mobile, provide stable standard room, on desktop adapt to tracks
     const count = editor.tracks.length;
     if (count > 3) {
       return 'h-[32vh] lg:h-[30vh] min-h-[240px] max-h-[38vh] opacity-100 flex flex-col';

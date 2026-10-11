@@ -6,7 +6,7 @@
   import { 
     Sliders, Sparkles, Check, X, RotateCcw, ArrowLeft, 
     Sun, Contrast, Droplets, Thermometer, Copy, ChevronLeft, 
-    ChevronRight, ChevronUp, ChevronDown, CircleDot, Palette 
+    ChevronRight, CircleDot, Palette 
   } from '@lucide/svelte';
 
   let { isBottomDocked = false, onClose } = $props<{ isBottomDocked?: boolean; onClose?: () => void }>();
@@ -20,14 +20,6 @@
   function scrollCategories(delta: number) {
     if (categoryScrollRef) {
       categoryScrollRef.scrollBy({ left: delta, behavior: 'smooth' });
-      editor.triggerHaptic('light');
-    }
-  }
-
-  function handleContainerScroll(e: UIEvent) {
-    const target = e.currentTarget as HTMLElement;
-    if (isBottomDocked && !editor.isBottomPanelExpanded && target.scrollTop > 8) {
-      editor.isBottomPanelExpanded = true;
       editor.triggerHaptic('light');
     }
   }
@@ -79,9 +71,6 @@
   }
 
   function updateColorParam(param: 'brightness' | 'contrast' | 'saturation' | 'temperature' | 'tint', val: number) {
-    if (isBottomDocked && !editor.isBottomPanelExpanded) {
-      editor.isBottomPanelExpanded = true;
-    }
     if (applyScope === 'all' || !selectedClip) {
       for (const track of editor.tracks) {
         for (const clip of track.clips) {
@@ -196,25 +185,6 @@
         <RotateCcw size={13} />
       </button>
 
-      {#if isBottomDocked}
-        <button
-          onclick={() => {
-            editor.isBottomPanelExpanded = !editor.isBottomPanelExpanded;
-            editor.triggerHaptic('light');
-          }}
-          class="flex items-center gap-1 px-2 py-1 rounded-xl bg-white/5 hover:bg-white/10 text-neutral-300 text-[10px] font-semibold transition-all border border-white/10 cursor-pointer shadow-sm"
-          title={editor.isBottomPanelExpanded ? "Paneli Daralt" : "Paneli Genişlet"}
-        >
-          {#if editor.isBottomPanelExpanded}
-            <ChevronDown size={13} class="text-cyan-400" />
-            <span class="hidden sm:inline">Daralt</span>
-          {:else}
-            <ChevronUp size={13} class="text-cyan-400" />
-            <span class="hidden sm:inline">Genişlet</span>
-          {/if}
-        </button>
-      {/if}
-
       {#if !isBottomDocked}
         <button
           onclick={handleClose}
@@ -293,10 +263,7 @@
   {/if}
 
   <!-- Main Scrollable Area: Presets or Color Wheel & Live Fine-Tuning Sliders -->
-  <div 
-    onscroll={handleContainerScroll}
-    class="flex-1 overflow-y-auto space-y-3 custom-scrollbar min-h-0 pr-1 transition-all"
-  >
+  <div class="flex-1 overflow-y-auto space-y-3 custom-scrollbar min-h-0 pr-1 transition-all">
     {#if viewMode === 'color_wheel'}
       <!-- Oklab Color Wheel Interactive Section -->
       {#if selectedClip}
