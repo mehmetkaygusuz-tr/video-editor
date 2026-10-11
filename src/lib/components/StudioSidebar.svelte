@@ -185,7 +185,7 @@
         <div class="w-2.5 h-2.5 rounded-full bg-blue-500 animate-pulse"></div>
         <span class="text-xs font-bold text-white uppercase tracking-wider">
           {#if editor.activeSidebarTab === 'media'}Medya Kütüphanesi
-          {:else if editor.activeSidebarTab === 'ai'}Yapay Zeka Araçları
+          {:else if editor.activeSidebarTab === 'ai'}AI Paneli
           {:else if editor.activeSidebarTab === 'templates'}Kurgu Şablonları
           {:else if editor.activeSidebarTab === 'filters'}Renk Filtreleri
           {:else}Altyazı Yöneticisi{/if}
@@ -223,10 +223,10 @@
           value="ai"
           onclick={() => editor.triggerHaptic('light')}
           class="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all min-h-[40px] focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-none data-[state=active]:bg-blue-950/60 data-[state=active]:text-blue-300 data-[state=active]:border data-[state=active]:border-blue-500/40 data-[state=active]:shadow-sm text-neutral-400 hover:text-white hover:bg-neutral-950 cursor-pointer"
-          title="Yapay Zeka Araçları (WebGPU)"
+          title="Yapay Zeka Paneli"
         >
           <Sparkles size={15} class="text-blue-400" />
-          <span>AI Araçları</span>
+          <span>AI Paneli</span>
         </Tabs.Trigger>
 
         <!-- Captions Tab Button -->
@@ -349,25 +349,9 @@
       </div>
     </Tabs.Content>
 
-    <!-- 2. TAB CONTENT: AI STUDIO TOOLS -->
+    <!-- 2. TAB CONTENT: AI PANEL TOOLS -->
     <Tabs.Content value="ai" class="flex-1 overflow-y-auto p-3.5 custom-scrollbar outline-none">
       <div class="space-y-4">
-        <!-- Top Status Banner -->
-        <div class="p-3 bg-neutral-950/60 border border-neutral-800 rounded-xl flex items-center justify-between">
-          <div class="flex items-center gap-2.5">
-            <div class="w-8 h-8 rounded-lg bg-emerald-500/15 border border-emerald-500/30 flex items-center justify-center text-emerald-400 flex-none">
-              <Cpu size={15} />
-            </div>
-            <div>
-              <div class="flex items-center gap-1.5">
-                <span class="text-xs font-bold text-white">WebGPU / On-Device AI</span>
-                <span class="text-[9px] px-1.5 py-0.2 bg-emerald-950 text-emerald-400 border border-emerald-800/60 rounded-full font-mono">%100 Yerel</span>
-              </div>
-              <p class="text-[10px] text-neutral-400">Verileriniz cihazınızda işlenir, sunucuya gitmez.</p>
-            </div>
-          </div>
-        </div>
-
         <!-- AI Assistant: Natural Language Command Trigger -->
         <div class="p-3 bg-gradient-to-br from-indigo-950/40 to-purple-950/30 border border-indigo-500/30 rounded-xl space-y-2">
           <div class="flex items-center justify-between">

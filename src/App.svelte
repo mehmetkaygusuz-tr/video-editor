@@ -608,9 +608,9 @@
           <img src="logo-icon.png" alt="Logo" class="h-8 w-8 sm:h-9 sm:w-9 object-contain rounded-xl p-0.5 bg-neutral-900/90 border border-white/15 shadow-[0_0_16px_rgba(139,92,246,0.35)] transition-transform group-hover:scale-105" />
           <div class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-400 border-2 border-neutral-900 rounded-full shadow-[0_0_8px_#34d399]"></div>
         </button>
-        <div class="flex flex-col">
+        <div class="flex flex-col justify-center">
           <div class="flex items-center gap-1.5">
-            <span class="hidden sm:inline-flex text-[9px] font-mono px-1.5 py-0.2 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 font-bold uppercase tracking-wider">2026 PRO</span>
+            <span class="hidden sm:inline-flex text-xs font-mono font-bold px-2 py-0.5 rounded-md bg-purple-500/25 text-purple-200 border border-purple-500/40 uppercase tracking-wider shadow-sm">2026 PRO</span>
           </div>
           <span class="text-[9px] font-mono text-neutral-400 hidden xs:inline tracking-tight">Yerel WebGPU Stüdyo</span>
         </div>
@@ -699,16 +699,6 @@
         onchange={handleMediaUpload} 
       />
 
-      <!-- Medya Yükle Button (Visible on Mobile & Desktop - Clear Upload Icon) -->
-      <button
-        onclick={() => headerFileInputRef?.click()}
-        class="flex items-center gap-1.5 px-2.5 sm:px-3 h-9 rounded-xl bg-sky-500/15 hover:bg-sky-500/25 text-sky-300 border border-sky-500/30 text-xs font-semibold active:scale-95 transition-all cursor-pointer shadow-sm"
-        title="Medya Yükle (Video, Ses, Resim Dosyası Seç)"
-      >
-        <Upload size={14} class="text-sky-400" />
-        <span class="text-xs font-semibold">Medya</span>
-      </button>
-
       <!-- Desktop Production Pipeline Toggles (Fluid Glass Pill) -->
       <div class="hidden lg:flex items-center spatial-glass rounded-xl p-0.5 gap-1 h-9">
         <button 
@@ -725,7 +715,7 @@
           title="2. Aşama: Otonom AI Araçları (Sessizlik, Arka Plan, Reframe)"
         >
           <Sparkles size={13} />
-          <span>AI Kurgu</span>
+          <span>AI Paneli</span>
         </button>
         <button 
           onclick={() => { editor.activeSidebarTab = 'templates'; appState.isInspectorOpen = true; }}
@@ -934,10 +924,6 @@
 
           <!-- Video Engine Status + Timecode + Fullscreen -->
           <div class="flex items-center gap-2 pointer-events-auto">
-            <div class="hidden sm:flex items-center gap-1.5 spatial-glass px-2.5 py-1 rounded-xl text-[10px] font-mono text-emerald-400 border border-emerald-500/20 shadow-md">
-              <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
-              <span>WebGPU 60 FPS</span>
-            </div>
             <div class="spatial-glass px-3 py-1 rounded-xl text-neutral-200 font-mono text-xs font-semibold tracking-wider border border-white/10 shadow-lg">
               {formatTimecode(editor.playhead)}
             </div>
@@ -1103,7 +1089,7 @@
     <!-- Minimized Transport Control Bar (Pinned Directly Above Timeline) -->
     <div class="flex-none px-3 sm:px-4 py-1.5 grid grid-cols-3 items-center spatial-glass lg:rounded-xl border-t lg:border border-white/10 z-20 transition-all select-none shadow-lg">
       <!-- Left: Razor Cut & Magnet Snapping & Beat Snapping -->
-      <div class="flex items-center gap-1.5 justify-self-start">
+      <div class="hidden lg:flex items-center gap-1.5 justify-self-start">
         <button
           onclick={() => { editor.splitClipAtPlayhead(); editor.triggerHaptic('medium'); }}
           class="px-2 py-1 rounded-lg bg-sky-500/15 hover:bg-sky-500/25 border border-sky-500/30 text-sky-300 text-xs font-semibold flex items-center gap-1.5 transition-all active:scale-95 cursor-pointer"
@@ -1236,7 +1222,7 @@
         <!-- Mobile workspace panel swapping logic (hidden on lg, takes timeline spot) -->
         <div class="flex-1 lg:hidden spatial-glass overflow-hidden flex flex-col h-full w-full">
           <div class="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
-            <StudioSidebar isMobileSheet={false} hideTabs={false} onClose={() => { editor.mobileWorkspace = 'timeline'; }} />
+            <StudioSidebar isMobileSheet={false} hideTabs={true} onClose={() => { editor.mobileWorkspace = 'timeline'; }} />
           </div>
         </div>
         <!-- On desktop, show timeline -->

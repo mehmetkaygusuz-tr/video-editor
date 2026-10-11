@@ -5,7 +5,7 @@
     Scissors, Trash2, Volume2, FastForward, Sparkles, Layers, 
     Crop, FolderClosed, Music, Type, X, ChevronUp, ChevronDown,
     SlidersHorizontal, Copy, RefreshCw, ZoomIn, Eye, EyeOff, Shuffle,
-    Gauge, Sliders, Palette, Zap, Undo2, Redo2, Magnet, Play, Pause
+    Gauge, Sliders, Palette, Zap, Undo2, Redo2, Magnet, Play, Pause, Wand2
   } from '@lucide/svelte';
 
   let selectedClip = $derived(editor.getSelectedClip());
@@ -68,6 +68,11 @@
     editor.announce(editor.isMagnetic ? 'Manyetik kurgu açık' : 'Manyetik kurgu kapalı');
   }
 
+  function toggleBeatSnapping() {
+    editor.snapToBeat = !editor.snapToBeat;
+    editor.triggerHaptic('light');
+    editor.announce(editor.snapToBeat ? 'Ritim yapışması açık' : 'Ritim yapışması kapalı');
+  }
 </script>
 
 <!-- 2026 Mobile Contextual Bottom Production Bar & Thumb Zone -->
@@ -327,12 +332,12 @@
     {:else}
       <!-- MODE B: GLOBAL PRODUCTION DOCK (No Clip Selected) -->
       <div 
-        class="flex-1 grid grid-cols-3 gap-2 w-full px-2 py-0.5"
+        class="flex-1 flex items-center gap-1.5 overflow-x-auto scroll-smooth w-full px-1 py-0.5 no-scrollbar touch-pan-x [-webkit-overflow-scrolling:touch]"
       >
         <!-- 1. Kurgu / Timeline -->
         <button 
           onclick={() => { editor.mobileWorkspace = 'timeline'; editor.selectClip(null); editor.triggerHaptic('light'); }}
-          class="relative flex flex-col items-center justify-center h-12 rounded-xl transition-all active:scale-95 {editor.mobileWorkspace === 'timeline' ? 'text-white bg-white/10 font-bold' : 'text-neutral-400 hover:text-white hover:bg-white/5'}"
+          class="relative flex flex-col items-center justify-center min-w-[56px] h-12 rounded-xl transition-all active:scale-95 flex-none {editor.mobileWorkspace === 'timeline' ? 'text-white bg-white/10 font-bold' : 'text-neutral-400 hover:text-white hover:bg-white/5'}"
           title="Zaman Çizelgesine Dön"
         >
           <Layers size={18} class={editor.mobileWorkspace === 'timeline' ? 'text-sky-400' : ''} />
@@ -342,23 +347,81 @@
           {/if}
         </button>
 
-        <!-- 2. AI Sihirbazı / Üretim Merkezi -->
+        <!-- 2. Böl / Jilet (Blade All across unlocked tracks) -->
+        <button 
+          onclick={() => { editor.splitClipAtPlayhead(); editor.triggerHaptic('medium'); }}
+          class="flex flex-col items-center justify-center min-w-[56px] h-12 rounded-xl text-sky-400 hover:text-sky-300 hover:bg-sky-500/10 active:scale-95 transition-all flex-none"
+          title="Klibi İğne Konumundan Böl (Blade All)"
+        >
+          <Scissors size={18} />
+          <span class="text-[10px] mt-1 font-medium text-sky-300">Böl</span>
+        </button>
+
+        <!-- 3. Manyetik Yapışma -->
+        <button 
+          onclick={() => toggleMagnetic()}
+          class="flex flex-col items-center justify-center min-w-[56px] h-12 rounded-xl active:scale-95 transition-all flex-none {editor.isMagnetic ? 'text-amber-400 bg-amber-500/15 font-bold border border-amber-500/25' : 'text-neutral-400 hover:text-white hover:bg-white/5'}"
+          title="Manyetik Hizalama"
+        >
+          <Magnet size={18} />
+          <span class="text-[10px] mt-1 font-medium">Manyetik</span>
+        </button>
+
+        <!-- 4. Ritim Yapışması -->
+        <button 
+          onclick={() => toggleBeatSnapping()}
+          class="flex flex-col items-center justify-center min-w-[56px] h-12 rounded-xl active:scale-95 transition-all flex-none {editor.snapToBeat ? 'text-pink-400 bg-pink-500/15 font-bold border border-pink-500/25' : 'text-neutral-400 hover:text-white hover:bg-white/5'}"
+          title="Ritim Hizalama"
+        >
+          <Music size={18} />
+          <span class="text-[10px] mt-1 font-medium">Ritim</span>
+        </button>
+
+        <div class="w-px h-6 bg-white/10 mx-0.5 flex-none"></div>
+
+        <!-- 5. Medya Sayfası -->
+        <button 
+          onclick={() => { editor.mobileWorkspace = 'media'; editor.activeSidebarTab = 'media'; editor.triggerHaptic('light'); }}
+          class="relative flex flex-col items-center justify-center min-w-[56px] h-12 rounded-xl transition-all active:scale-95 flex-none {editor.mobileWorkspace === 'media' ? 'text-white bg-blue-500/20 border border-blue-500/35 font-bold' : 'text-neutral-400 hover:text-white hover:bg-white/5'}"
+          title="Medya Kütüphanesi"
+        >
+          <FolderClosed size={18} class={editor.mobileWorkspace === 'media' ? 'text-blue-400' : ''} />
+          <span class="text-[10px] mt-1 font-medium">Medya</span>
+          {#if editor.mobileWorkspace === 'media'}
+            <div class="absolute bottom-1 w-3 h-0.5 bg-blue-400 rounded-full shadow-[0_0_6px_#60a5fa]"></div>
+          {/if}
+        </button>
+
+        <!-- 6. AI Paneli -->
         <button 
           onclick={() => { editor.mobileWorkspace = 'ai'; editor.activeSidebarTab = 'ai'; editor.triggerHaptic('medium'); }}
-          class="relative flex flex-col items-center justify-center h-12 rounded-xl transition-all active:scale-95 {editor.mobileWorkspace === 'ai' ? 'text-white bg-purple-500/20 border border-purple-500/35 font-bold shadow-[0_0_12px_rgba(168,85,247,0.3)]' : 'text-purple-300 hover:text-white hover:bg-purple-500/10'}"
-          title="Yapay Zeka Araçları (WebGPU)"
+          class="relative flex flex-col items-center justify-center min-w-[56px] h-12 rounded-xl transition-all active:scale-95 flex-none {editor.mobileWorkspace === 'ai' ? 'text-white bg-purple-500/20 border border-purple-500/35 font-bold shadow-[0_0_12px_rgba(168,85,247,0.3)]' : 'text-purple-300 hover:text-white hover:bg-purple-500/10'}"
+          title="Yapay Zeka Paneli"
         >
           <Sparkles size={18} class="text-purple-400" />
-          <span class="text-[10px] mt-1 font-semibold">AI Stüdyo</span>
+          <span class="text-[10px] mt-1 font-semibold">AI Paneli</span>
           {#if editor.mobileWorkspace === 'ai'}
             <div class="absolute bottom-1 w-3 h-0.5 bg-purple-400 rounded-full shadow-[0_0_6px_#c084fc]"></div>
           {/if}
         </button>
 
-        <!-- 3. Sinematik Renk Filtreleri (Oklab LUT) -->
+        <!-- 7. Kurgu Şablonları -->
+        <button 
+          onclick={() => { editor.mobileWorkspace = 'templates'; editor.activeSidebarTab = 'templates'; editor.triggerHaptic('light'); }}
+          class="relative flex flex-col items-center justify-center min-w-[56px] h-12 rounded-xl transition-all active:scale-95 flex-none {editor.mobileWorkspace === 'templates' ? 'text-white bg-pink-500/20 border border-pink-500/35 font-bold' : 'text-neutral-400 hover:text-white hover:bg-white/5'}"
+          title="Sihirli Şablonlar"
+        >
+          <Wand2 size={18} class={editor.mobileWorkspace === 'templates' ? 'text-pink-400' : ''} />
+          <span class="text-[10px] mt-1 font-medium">Şablon</span>
+          {#if editor.mobileWorkspace === 'templates'}
+            <div class="absolute bottom-1 w-3 h-0.5 bg-pink-400 rounded-full shadow-[0_0_6px_#f472b6]"></div>
+          {/if}
+        </button>
+
+        <!-- 8. Sinematik Renk Filtreleri (Oklab LUT) -->
         <button 
           onclick={() => { editor.mobileWorkspace = 'filters'; editor.triggerHaptic('light'); }}
-          class="relative flex flex-col items-center justify-center h-12 rounded-xl transition-all active:scale-95 {editor.mobileWorkspace === 'filters' ? 'text-white bg-cyan-500/15 border border-cyan-500/25 font-bold' : 'text-neutral-400 hover:text-white hover:bg-white/5'}"
+          class="relative flex flex-col items-center justify-center min-w-[56px] h-12 rounded-xl transition-all active:scale-95 flex-none {editor.mobileWorkspace === 'filters' ? 'text-white bg-cyan-500/15 border border-cyan-500/25 font-bold' : 'text-neutral-400 hover:text-white hover:bg-white/5'}"
           title="Renk Filtreleri & LUT Kütüphanesi"
         >
           <Palette size={18} class="text-cyan-400" />

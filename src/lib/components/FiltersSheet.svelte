@@ -145,117 +145,85 @@
 </script>
 
 <div class="w-full h-full flex flex-col {isBottomDocked ? 'p-2 sm:p-3 overflow-hidden bg-neutral-950/70 backdrop-blur-md' : 'p-4 md:p-6 space-y-4 max-h-[80vh] overflow-y-auto custom-scrollbar select-none'}">
-  <!-- Top Navigation & Control Bar -->
-  <div class="flex-none flex flex-col gap-2 pb-2 border-b border-white/10">
-    <div class="flex items-center justify-between gap-2">
-      <!-- Left: Back to Timeline + Title -->
-      <div class="flex items-center gap-2 min-w-0">
-        {#if isBottomDocked}
-          <button
-            onclick={handleClose}
-            class="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-xl bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/35 text-xs font-semibold active:scale-95 transition-all cursor-pointer flex-none shadow-sm"
-            title="Zaman Çizelgesine Geri Dön"
-          >
-            <ArrowLeft size={13} />
-            <span>Zaman Çizelgesi</span>
-          </button>
-        {/if}
-
-        <div class="flex items-center gap-1.5 min-w-0">
-          <div class="p-1 rounded-lg bg-cyan-500/15 border border-cyan-500/25 text-cyan-400 flex-none hidden xs:flex">
-            <Sliders size={14} />
-          </div>
-          <div class="truncate">
-            <h3 class="text-xs font-bold text-white truncate leading-tight">Renk & LUT</h3>
-            <p class="text-[9px] text-neutral-400 hidden sm:block">Oklab Donanım Hızlandırmalı</p>
-          </div>
-        </div>
+  <!-- Top Navigation & Control Bar (Streamlined) -->
+  <div class="flex-none flex items-center justify-between gap-1.5 pb-2 border-b border-white/10 flex-wrap sm:flex-nowrap">
+    <div class="flex items-center gap-1.5 flex-wrap">
+      <div class="flex items-center spatial-glass rounded-xl p-0.5 border border-white/10 text-[10px]">
+        <button
+          onclick={() => applyScope = 'selected'}
+          class="px-2.5 py-1 rounded-lg transition-all font-semibold cursor-pointer {applyScope === 'selected' ? 'bg-cyan-500/25 text-cyan-300 font-bold border border-cyan-500/40 shadow-sm' : 'text-neutral-400 hover:text-white'}"
+          title="Filtre ve ayarları sadece seçili klibe uygula"
+        >
+          Seçili Klip
+        </button>
+        <button
+          onclick={() => applyScope = 'all'}
+          class="px-2.5 py-1 rounded-lg transition-all font-semibold cursor-pointer {applyScope === 'all' ? 'bg-cyan-500/25 text-cyan-300 font-bold border border-cyan-500/40 shadow-sm' : 'text-neutral-400 hover:text-white'}"
+          title="Filtre ve renk ayarlarını tüm kesilmiş video sahnelerine aynı anda uygula"
+        >
+          Tüm Klipler
+        </button>
       </div>
 
-      <!-- Right: Expand/Collapse & Close -->
-      <div class="flex items-center gap-1.5 flex-none">
-        {#if isBottomDocked}
-          <button
-            onclick={() => {
-              editor.isBottomPanelExpanded = !editor.isBottomPanelExpanded;
-              editor.triggerHaptic('light');
-            }}
-            class="flex items-center gap-1 px-2 py-1 rounded-xl bg-white/5 hover:bg-white/10 text-neutral-300 text-[10px] font-semibold transition-all border border-white/10 cursor-pointer shadow-sm"
-            title={editor.isBottomPanelExpanded ? "Paneli Daralt" : "Paneli Genişlet"}
-          >
-            {#if editor.isBottomPanelExpanded}
-              <ChevronDown size={13} class="text-cyan-400" />
-              <span class="hidden sm:inline">Daralt</span>
-            {:else}
-              <ChevronUp size={13} class="text-cyan-400" />
-              <span class="hidden sm:inline">Genişlet</span>
-            {/if}
-          </button>
-        {/if}
-
-        {#if !isBottomDocked}
-          <button
-            onclick={handleClose}
-            class="p-1.5 rounded-xl bg-neutral-800/80 hover:bg-neutral-800 text-neutral-400 hover:text-white transition-colors cursor-pointer"
-            title="Kapat"
-          >
-            <X size={14} />
-          </button>
-        {/if}
-      </div>
+      {#if selectedClip && applyScope === 'selected'}
+        <button
+          onclick={copySelectedGradeToAll}
+          class="flex items-center gap-1 px-2 py-1 rounded-xl bg-white/5 hover:bg-white/15 text-neutral-300 hover:text-white border border-white/10 text-[10px] font-medium transition-all cursor-pointer"
+          title="Bu klibin renk ayarlarını diğer tüm kesilmiş video parçalarına tek tıkla kopyala"
+        >
+          <Copy size={11} />
+          <span class="hidden xs:inline">Tümüne Yay</span>
+        </button>
+      {/if}
     </div>
 
-    <!-- Secondary Toolbar Row: Scope Selection (Seçili Klip / Tüm Klipler) + AI Renk + Sıfırla -->
-    <div class="flex items-center justify-between gap-1.5 pt-0.5 flex-wrap sm:flex-nowrap">
-      <div class="flex items-center gap-1.5 flex-wrap">
-        <div class="flex items-center spatial-glass rounded-xl p-0.5 border border-white/10 text-[10px]">
-          <button
-            onclick={() => applyScope = 'selected'}
-            class="px-2.5 py-1 rounded-lg transition-all font-semibold cursor-pointer {applyScope === 'selected' ? 'bg-cyan-500/25 text-cyan-300 font-bold border border-cyan-500/40 shadow-sm' : 'text-neutral-400 hover:text-white'}"
-            title="Filtre ve ayarları sadece seçili klibe uygula"
-          >
-            Seçili Klip
-          </button>
-          <button
-            onclick={() => applyScope = 'all'}
-            class="px-2.5 py-1 rounded-lg transition-all font-semibold cursor-pointer {applyScope === 'all' ? 'bg-cyan-500/25 text-cyan-300 font-bold border border-cyan-500/40 shadow-sm' : 'text-neutral-400 hover:text-white'}"
-            title="Filtre ve renk ayarlarını tüm kesilmiş video sahnelerine aynı anda uygula"
-          >
-            Tüm Klipler
-          </button>
-        </div>
+    <div class="flex items-center gap-1.5 ml-auto">
+      <button
+        onclick={() => aiService.autoColorEnhance()}
+        disabled={aiService.isRunning}
+        class="px-2.5 py-1 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-[10px] sm:text-[11px] font-semibold flex items-center gap-1 shadow-md shadow-purple-900/30 transition-all cursor-pointer disabled:opacity-50"
+        title="Yapay zeka ile sahne ışığını analiz et ve sinematik renk uygula"
+      >
+        <Sparkles size={11} class={aiService.isRunning ? 'animate-spin' : ''} />
+        <span>AI Renk</span>
+      </button>
 
-        {#if selectedClip && applyScope === 'selected'}
-          <button
-            onclick={copySelectedGradeToAll}
-            class="flex items-center gap-1 px-2 py-1 rounded-xl bg-white/5 hover:bg-white/15 text-neutral-300 hover:text-white border border-white/10 text-[10px] font-medium transition-all cursor-pointer"
-            title="Bu klibin renk ayarlarını diğer tüm kesilmiş video parçalarına tek tıkla kopyala"
-          >
-            <Copy size={11} />
-            <span class="hidden xs:inline">Tümüne Yay</span>
-          </button>
-        {/if}
-      </div>
+      <button
+        onclick={resetGrading}
+        class="p-1 rounded-xl bg-neutral-800/80 hover:bg-neutral-800 text-neutral-400 hover:text-white transition-colors cursor-pointer"
+        title="Renkleri Sıfırla"
+      >
+        <RotateCcw size={13} />
+      </button>
 
-      <div class="flex items-center gap-1.5 ml-auto">
+      {#if isBottomDocked}
         <button
-          onclick={() => aiService.autoColorEnhance()}
-          disabled={aiService.isRunning}
-          class="px-2.5 py-1 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-[10px] sm:text-[11px] font-semibold flex items-center gap-1 shadow-md shadow-purple-900/30 transition-all cursor-pointer disabled:opacity-50"
-          title="Yapay zeka ile sahne ışığını analiz et ve sinematik renk uygula"
+          onclick={() => {
+            editor.isBottomPanelExpanded = !editor.isBottomPanelExpanded;
+            editor.triggerHaptic('light');
+          }}
+          class="flex items-center gap-1 px-2 py-1 rounded-xl bg-white/5 hover:bg-white/10 text-neutral-300 text-[10px] font-semibold transition-all border border-white/10 cursor-pointer shadow-sm"
+          title={editor.isBottomPanelExpanded ? "Paneli Daralt" : "Paneli Genişlet"}
         >
-          <Sparkles size={11} class={aiService.isRunning ? 'animate-spin' : ''} />
-          <span>AI Renk</span>
+          {#if editor.isBottomPanelExpanded}
+            <ChevronDown size={13} class="text-cyan-400" />
+            <span class="hidden sm:inline">Daralt</span>
+          {:else}
+            <ChevronUp size={13} class="text-cyan-400" />
+            <span class="hidden sm:inline">Genişlet</span>
+          {/if}
         </button>
+      {/if}
 
+      {#if !isBottomDocked}
         <button
-          onclick={resetGrading}
-          class="p-1 rounded-xl bg-neutral-800/80 hover:bg-neutral-800 text-neutral-400 hover:text-white transition-colors cursor-pointer"
-          title="Renkleri Sıfırla"
+          onclick={handleClose}
+          class="p-1.5 rounded-xl bg-neutral-800/80 hover:bg-neutral-800 text-neutral-400 hover:text-white transition-colors cursor-pointer"
+          title="Kapat"
         >
-          <RotateCcw size={12} />
+          <X size={14} />
         </button>
-      </div>
+      {/if}
     </div>
   </div>
 
