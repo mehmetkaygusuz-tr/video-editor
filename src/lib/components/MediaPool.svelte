@@ -180,7 +180,7 @@
       </div>
     {/if}
 
-    {#each editor.assets as asset}
+    {#each editor.assets as asset (asset.id)}
       <div 
         role="listitem"
         class="w-full bg-neutral-950 border border-neutral-800 hover:border-neutral-600 rounded-lg p-2.5 flex items-center gap-3 cursor-grab active:cursor-grabbing transition-all focus-within:ring-2 focus-within:ring-blue-500 focus-within:outline-none group"

@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
 
   let {
     value = { l: 0.7, a: 0.0, b: 0.0 },
@@ -78,12 +77,8 @@
     ctx.putImageData(imgData, 0, 0);
   }
 
-  onMount(() => {
-    renderWheel();
-  });
-
   $effect(() => {
-    // Re-render when Lightness changes
+    // Render on mount and whenever Lightness changes
     if (currentL !== undefined && canvasRef) {
       renderWheel();
     }

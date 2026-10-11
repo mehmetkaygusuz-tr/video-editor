@@ -1,7 +1,16 @@
 <script lang="ts">
+  import type { Snippet } from 'svelte';
   import { editor } from '../editor.svelte';
   
-  let { isOpen = false, onClose, children } = $props();
+  let { 
+    isOpen = false, 
+    onClose, 
+    children 
+  }: { 
+    isOpen?: boolean; 
+    onClose?: () => void; 
+    children?: Snippet 
+  } = $props();
 
   let sheetRef = $state<HTMLDivElement | undefined>();
   let dragStartY = $state(0);

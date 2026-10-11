@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
   import { getFileFromOPFS } from '../opfs';
   import { generateWaveformPeaks } from '../audio';
   import { editor } from '../editor.svelte';
@@ -13,9 +12,8 @@
   }>();
 
   let canvasEl = $state<HTMLCanvasElement | undefined>();
-  let peaks = $state<Float32Array | null>(null);
+  let peaks = $state.raw<Float32Array | null>(null);
   let totalDuration = $state<number>(60);
-  let resizeObserver: ResizeObserver | null = null;
 
   function renderWaveform() {
     if (!canvasEl || !peaks || peaks.length === 0) return;
@@ -59,47 +57,58 @@
     ctx.restore();
   }
 
+  // Svelte 5 Effect: Load peaks when assetId changes with cancellation teardown
   $effect(() => {
-    // Re-render when geometry or peaks change
+    const currentAssetId = assetId;
+    const asset = editor.assets.find(a => a.id === currentAssetId);
+    if (!asset || asset.type === 'image') return;
+
+    let isCancelled = false;
+
+    (async () => {
+      try {
+        let file: File | null | undefined = editor.getCachedFile(asset.name);
+        if (!file) {
+          file = await getFileFromOPFS(asset.name);
+        }
+        if (file && !isCancelled) {
+          totalDuration = asset.duration || 60;
+          const p = await generateWaveformPeaks(file, 1000);
+          if (!isCancelled) {
+            peaks = p;
+            renderWaveform();
+          }
+        }
+      } catch (e) {
+        console.warn('[Waveform] Generation error:', e);
+      }
+    })();
+
+    return () => {
+      isCancelled = true;
+    };
+  });
+
+  // Svelte 5 Effect: Track layout resize with teardown
+  $effect(() => {
+    if (!canvasEl) return;
+    const ro = new ResizeObserver(() => {
+      renderWaveform();
+    });
+    ro.observe(canvasEl);
+    return () => {
+      ro.disconnect();
+    };
+  });
+
+  // Re-render when geometry or peaks change
+  $effect(() => {
     const _z = zoom;
     const _o = sourceOffset;
     const _d = duration;
     const _p = peaks;
     if (canvasEl && peaks) {
       renderWaveform();
-    }
-  });
-
-  onMount(async () => {
-    if (!canvasEl) return;
-
-    resizeObserver = new ResizeObserver(() => {
-      renderWaveform();
-    });
-    resizeObserver.observe(canvasEl);
-
-    const asset = editor.assets.find(a => a.id === assetId);
-    if (!asset || asset.type === 'image') return;
-
-    try {
-      let file: File | null | undefined = editor.getCachedFile(asset.name);
-      if (!file) {
-        file = await getFileFromOPFS(asset.name);
-      }
-      if (file) {
-        totalDuration = asset.duration || 60;
-        peaks = await generateWaveformPeaks(file, 1000);
-        renderWaveform();
-      }
-    } catch (e) {
-      console.warn('[Waveform] Generation error:', e);
-    }
-  });
-
-  onDestroy(() => {
-    if (resizeObserver && canvasEl) {
-      resizeObserver.unobserve(canvasEl);
-      resizeObserver.disconnect();
     }
   });
 </script>

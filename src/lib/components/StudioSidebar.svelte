@@ -319,7 +319,7 @@
           </div>
         {:else}
           <div class="grid grid-cols-1 gap-2" role="list">
-            {#each editor.assets as asset}
+            {#each editor.assets as asset (asset.id)}
               <div 
                 role="listitem"
                 class="p-2.5 bg-neutral-950/70 border border-neutral-800/80 hover:border-neutral-700 rounded-xl flex items-center justify-between gap-3 group transition-all"
@@ -709,7 +709,7 @@
           </div>
         {:else}
           <div class="space-y-2">
-            {#each allSubtitles as item}
+            {#each allSubtitles as item (item.clipId + '_' + item.sub.id)}
               <div class="p-2.5 bg-neutral-950/70 border border-neutral-800 hover:border-neutral-700 rounded-xl space-y-1.5 transition-all">
                 <div class="flex items-center justify-between text-[10px] font-mono text-neutral-400">
                   <button 
@@ -785,7 +785,7 @@
         <div class="space-y-2">
           <span class="block text-xs font-semibold text-neutral-300">1. Şablon Seçin ({MAGIC_TEMPLATES.length} Hazır Stil)</span>
           <div class="grid grid-cols-1 gap-2 max-h-56 overflow-y-auto custom-scrollbar pr-1">
-            {#each (selectedTemplateCategory === 'all' ? MAGIC_TEMPLATES : MAGIC_TEMPLATES.filter(t => t.category === selectedTemplateCategory)) as template}
+            {#each (selectedTemplateCategory === 'all' ? MAGIC_TEMPLATES : MAGIC_TEMPLATES.filter(t => t.category === selectedTemplateCategory)) as template (template.id)}
               <button 
                 class="text-left p-2.5 rounded-xl border transition-all cursor-pointer {selectedTemplateId === template.id ? 'bg-pink-950/40 border-pink-500 text-pink-100 shadow-sm' : 'bg-neutral-950 border-neutral-800 text-neutral-300 hover:border-neutral-700'}"
                 onclick={() => selectedTemplateId = template.id}
@@ -818,7 +818,7 @@
             class="w-full px-3 py-2 rounded-lg bg-neutral-950 border border-neutral-800 text-xs text-white focus:border-pink-500 focus:outline-none"
           >
             <option value="">Ses veya müzik dosyası seçin...</option>
-            {#each editor.assets.filter(a => a.type === 'audio' || a.type === 'video') as asset}
+            {#each editor.assets.filter(a => a.type === 'audio' || a.type === 'video') as asset (asset.id)}
               <option value={asset.id}>{asset.name}</option>
             {/each}
           </select>
@@ -833,7 +833,7 @@
             </div>
           </div>
           <div class="space-y-1.5 max-h-36 overflow-y-auto custom-scrollbar pr-1">
-            {#each editor.assets.filter(a => a.type === 'video' || a.type === 'image') as asset}
+            {#each editor.assets.filter(a => a.type === 'video' || a.type === 'image') as asset (asset.id)}
               <label class="flex items-center gap-2 p-2 rounded-lg bg-neutral-950 border border-neutral-800 cursor-pointer hover:border-neutral-700">
                 <input 
                   type="checkbox" 
@@ -930,7 +930,7 @@
 
         <!-- Filters Grid -->
         <div class="grid grid-cols-1 gap-2">
-          {#each (selectedFilterCategory === 'all' ? FILTER_PRESETS : FILTER_PRESETS.filter(p => p.category === selectedFilterCategory)) as preset}
+          {#each (selectedFilterCategory === 'all' ? FILTER_PRESETS : FILTER_PRESETS.filter(p => p.category === selectedFilterCategory)) as preset (preset.id)}
             {@const isCurrent = selectedClip?.colorGrading?.lut === preset.grading.lut}
             <button
               onclick={() => {

@@ -49,7 +49,21 @@ class VideoEditor {
   tracks = $state<TimelineTrack[]>([]);
   assets = $state<Asset[]>([]);
   playhead = $state(0);
-  duration = $state(10); // Dynamic timeline duration initialized to 10s
+  
+  get duration(): number {
+    let max = 0;
+    for (const track of this.tracks) {
+      for (const clip of track.clips) {
+        const end = clip.startAt + clip.duration;
+        if (end > max) max = end;
+      }
+    }
+    return max > 0 ? Number(max.toFixed(2)) : 10;
+  }
+  set duration(_val: number) {
+    // Computed automatically from clip bounds
+  }
+
   isPlaying = $state(false);
   projectFps = $state(DEFAULT_PROJECT_FPS); // SMPTE standard (30 fps)
   

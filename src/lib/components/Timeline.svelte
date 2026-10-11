@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy, untrack } from 'svelte';
+  import { untrack } from 'svelte';
   import { editor } from '../editor.svelte';
   import { aiService } from '../engine/aiService.svelte';
   import { masterAudioClock } from '../engine/audioClock';
@@ -33,33 +33,8 @@
   const viewportStart = $derived(editor.scrollX / editor.zoom);
   const viewportEnd = $derived((editor.scrollX + containerWidth) / editor.zoom);
 
-  // Strict media end: Timeline duration strictly matches the end of media clips
-  const maxClipEndTime = $derived.by(() => {
-    let max = 0;
-    for (const track of editor.tracks) {
-      for (const clip of track.clips) {
-        const end = clip.startAt + clip.duration;
-        if (end > max) max = end;
-      }
-    }
-    return max;
-  });
-
-  const dynamicTimelineDuration = $derived.by(() => {
-    if (maxClipEndTime > 0) {
-      return Number(maxClipEndTime.toFixed(2));
-    }
-    return 10;
-  });
-
-  $effect(() => {
-    const nextDur = Number(dynamicTimelineDuration.toFixed(2));
-    if (editor.duration !== nextDur) {
-      untrack(() => {
-        editor.duration = nextDur;
-      });
-    }
-  });
+  // Strict media end: Timeline duration strictly matches the end of media clips via reactive getter
+  const dynamicTimelineDuration = $derived(editor.duration);
 
   // Clamp vertical scroll so timeline never scrolls down into empty space
   const maxScrollY = $derived.by(() => {
@@ -253,46 +228,14 @@
     }
   }
 
-  function handleGlobalKeyDown(e: KeyboardEvent) {
-    const target = e.target as HTMLElement | null;
-    if (target && target.closest('input, textarea, [contenteditable="true"]')) {
-      return;
-    }
-    const isCtrlOrMeta = e.ctrlKey || e.metaKey;
-
-    if (isCtrlOrMeta && !e.shiftKey && (e.key === 'z' || e.key === 'Z')) {
-      e.preventDefault();
-      editor.undo();
-    } else if (isCtrlOrMeta && (e.key === 'y' || e.key === 'Y' || (e.shiftKey && (e.key === 'z' || e.key === 'Z')))) {
-      e.preventDefault();
-      editor.redo();
-    } else if (e.key === 's' || e.key === 'S') {
-      e.preventDefault();
-      editor.splitClipAtPlayhead();
-    } else if (e.key === 'Delete' || e.key === 'Backspace') {
-      if (editor.selectedClipId) {
-        e.preventDefault();
-        editor.deleteClip();
-      }
-    } else if (e.key === 'm' || e.key === 'M') {
-      e.preventDefault();
-      editor.isMagnetic = !editor.isMagnetic;
-      editor.announce(editor.isMagnetic ? 'Manyetik mod açık' : 'Manyetik mod kapalı');
-    }
-  }
-
-  onMount(() => {
-    if (container) {
-       container.addEventListener('wheel', handleWheel, { passive: false });
-    }
-    window.addEventListener('keydown', handleGlobalKeyDown);
-  });
-
-  onDestroy(() => {
-    if (container) {
-       container.removeEventListener('wheel', handleWheel);
-    }
-    window.removeEventListener('keydown', handleGlobalKeyDown);
+  // Svelte 5 Effect: Bind non-passive wheel listener with automatic teardown
+  $effect(() => {
+    const el = container;
+    if (!el) return;
+    el.addEventListener('wheel', handleWheel, { passive: false });
+    return () => {
+      el.removeEventListener('wheel', handleWheel);
+    };
   });
 
   function handlePointerDown(e: PointerEvent) {
@@ -833,17 +776,14 @@
     } else if ((e.ctrlKey || e.metaKey) && e.code === 'KeyD') {
       e.preventDefault();
       editor.duplicateClip();
+    } else if (e.code === 'KeyM') {
+      e.preventDefault();
+      editor.isMagnetic = !editor.isMagnetic;
+      editor.announce(editor.isMagnetic ? 'Manyetik mod açık' : 'Manyetik mod kapalı');
     } else if (e.code === 'Escape') {
       editor.selectClip(null);
     }
   }
-
-  onMount(() => {
-    window.addEventListener('keydown', handleKeyDown);
-    return () => {
-      window.removeEventListener('keydown', handleKeyDown);
-    };
-  });
 
   // Auto-scroll timeline to follow playhead during playback (keeps needle in comfortable viewport)
   $effect(() => {
@@ -864,11 +804,14 @@
   });
 </script>
 
-<svelte:window onresize={() => {
-  if (isMobileMode && containerWidth > 0 && !isDraggingPlayhead) {
-     editor.scrollX = Math.max(0, editor.playhead * editor.zoom - (containerWidth / 2));
-  }
-}} />
+<svelte:window 
+  onkeydown={handleKeyDown}
+  onresize={() => {
+    if (isMobileMode && containerWidth > 0 && !isDraggingPlayhead) {
+       editor.scrollX = Math.max(0, editor.playhead * editor.zoom - (containerWidth / 2));
+    }
+  }} 
+/>
 
 <div 
   class="relative w-full h-full bg-transparent flex flex-col select-none overflow-hidden" 
@@ -897,7 +840,7 @@
       </div>
       
       <div class="relative flex-1" style="transform: translate3d(0, -{editor.scrollY}px, 0)">
-        {#each editor.tracks as track, trackIndex}
+        {#each editor.tracks as track, trackIndex (track.id)}
           <div class="h-14 border-b border-white/5 flex items-center justify-between px-2 bg-neutral-950/40 hover:bg-white/[0.03] transition-colors">
             <div class="flex items-center gap-1.5 min-w-0">
               {#if track.type === 'video' || track.name.startsWith('V')}
@@ -1103,10 +1046,10 @@
         {/if}
 
         <!-- Visual End of Video Cap -->
-        {#if maxClipEndTime > 0}
+        {#if editor.duration > 0}
           <div 
             class="absolute top-0 bottom-0 w-[2px] bg-rose-500/80 z-20 pointer-events-none shadow-[0_0_10px_rgba(244,63,94,0.6)]"
-            style="transform: translate3d({maxClipEndTime * editor.zoom}px, 0, 0);"
+            style="transform: translate3d({editor.duration * editor.zoom}px, 0, 0);"
           >
             <div class="absolute -top-6 -left-3 px-1.5 py-0.5 rounded bg-rose-600/90 text-white text-[8px] font-mono font-bold uppercase shadow tracking-tight">
               Bitiş
@@ -1114,7 +1057,7 @@
           </div>
         {/if}
 
-        {#each editor.tracks as track, trackIndex}
+        {#each editor.tracks as track, trackIndex (track.id)}
           {@const visibleClips = track.clips.filter(clip => clip.startAt <= viewportEnd && (clip.startAt + clip.duration) >= viewportStart)}
           <div 
             role="region"

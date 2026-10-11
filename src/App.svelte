@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, onDestroy, untrack } from 'svelte';
+  import { onMount, untrack } from 'svelte';
   import { editor } from './lib/editor.svelte';
   import type { TimelineClip } from './lib/types';
   import { updateAudioEngine, ensureAudioUnlocked } from './lib/audio';
@@ -505,7 +505,6 @@
   }
 
   onMount(() => {
-    window.addEventListener('keydown', handleGlobalKeydown);
     lastTime = performance.now();
     playLoopId = requestAnimationFrame(playLoop);
 
@@ -515,11 +514,10 @@
     };
     window.addEventListener('pointerdown', unlockAudio, { once: true });
     window.addEventListener('touchstart', unlockAudio, { once: true });
-  });
 
-  onDestroy(() => {
-    window.removeEventListener('keydown', handleGlobalKeydown);
-    if (playLoopId) cancelAnimationFrame(playLoopId);
+    return () => {
+      if (playLoopId) cancelAnimationFrame(playLoopId);
+    };
   });
 
   $effect(() => {
@@ -614,6 +612,8 @@
     }
   }
 </script>
+
+<svelte:window onkeydown={handleGlobalKeydown} />
 
 <main class="w-screen h-[100dvh] spatial-bg text-neutral-200 flex flex-col font-sans overflow-hidden select-none lg:p-2.5 lg:gap-2.5" data-theme={editor.activeTheme}>
   <!-- 2026 Spatial Glass Studio Header & Dynamic Island -->
@@ -1030,7 +1030,7 @@
               >
                 <!-- Words container with karaoke highlighting -->
                 <div class="flex flex-wrap items-center justify-center gap-x-1.5 gap-y-0.5">
-                  {#each activeSubtitleInfo.words as w, idx}
+                  {#each activeSubtitleInfo.words as w, idx (idx)}
                     {@const isCurrentWord = idx === activeSubtitleInfo.activeWordIndex}
                     {@const isPastWord = idx < activeSubtitleInfo.activeWordIndex}
                     <span 
