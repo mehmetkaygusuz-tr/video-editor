@@ -37,6 +37,24 @@ export default defineConfig({
   worker: {
     format: 'es'
   },
+  base: process.env.BASE_URL || './',
+  build: {
+    chunkSizeWarningLimit: 2500,
+    rollupOptions: {
+      output: {
+        manualChunks(id) {
+          if (id.includes('node_modules')) {
+            if (id.includes('@lucide/svelte')) {
+              return 'vendor-icons';
+            }
+            if (id.includes('bits-ui')) {
+              return 'vendor-ui';
+            }
+          }
+        }
+      }
+    }
+  },
   optimizeDeps: {
     exclude: ['sqlocal']
   }

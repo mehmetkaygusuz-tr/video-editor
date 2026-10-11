@@ -2,11 +2,17 @@
   import { editor } from '../editor.svelte';
   import { FILTER_PRESETS } from '../filters';
   import { aiService } from '../engine/aiService.svelte';
-  import { Sliders, Sparkles, Check, X, RotateCcw, ArrowLeft, Sun, Contrast, Droplets, Thermometer, Copy, ChevronLeft, ChevronRight, ChevronUp, ChevronDown } from '@lucide/svelte';
+  import OklabColorWheel from './controls/OklabColorWheel.svelte';
+  import { 
+    Sliders, Sparkles, Check, X, RotateCcw, ArrowLeft, 
+    Sun, Contrast, Droplets, Thermometer, Copy, ChevronLeft, 
+    ChevronRight, ChevronUp, ChevronDown, CircleDot, Palette 
+  } from '@lucide/svelte';
 
   let { isBottomDocked = false, onClose } = $props<{ isBottomDocked?: boolean; onClose?: () => void }>();
 
   let categoryScrollRef = $state<HTMLDivElement | null>(null);
+  let viewMode = $state<'presets' | 'color_wheel'>('presets');
   let selectedCategory = $state<'all' | 'cinematic' | 'creative' | 'vintage' | 'clean'>('all');
   let applyScope = $state<'selected' | 'all'>('selected');
   let selectedClip = $derived(editor.getSelectedClip());
@@ -72,7 +78,7 @@
     editor.triggerHaptic('medium');
   }
 
-  function updateColorParam(param: 'brightness' | 'contrast' | 'saturation' | 'temperature', val: number) {
+  function updateColorParam(param: 'brightness' | 'contrast' | 'saturation' | 'temperature' | 'tint', val: number) {
     if (isBottomDocked && !editor.isBottomPanelExpanded) {
       editor.isBottomPanelExpanded = true;
     }
@@ -228,55 +234,119 @@
     </div>
   </div>
 
-  <!-- Category Pills (Horizontal scroll with Smooth Left/Right Arrow Navigation) -->
-  <div class="flex-none flex items-center gap-1 py-1.5 relative w-full">
-    <button
-      type="button"
-      onclick={() => scrollCategories(-120)}
-      class="flex-none p-1 rounded-lg bg-neutral-900/90 hover:bg-neutral-800 text-neutral-400 hover:text-white border border-white/10 active:scale-95 transition-all shadow-sm cursor-pointer"
-      title="Sola Kaydır"
-    >
-      <ChevronLeft size={13} />
-    </button>
-
-    <div 
-      bind:this={categoryScrollRef}
-      class="flex-1 flex items-center gap-1.5 overflow-x-auto scroll-smooth no-scrollbar [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] px-0.5"
-    >
-      {#each [
-        { id: 'all', label: 'Tümü' },
-        { id: 'cinematic', label: 'Sinematik' },
-        { id: 'creative', label: 'Yaratıcı' },
-        { id: 'vintage', label: 'Nostalji 90s' },
-        { id: 'clean', label: 'Temiz / Reklam' }
-      ] as cat}
-        <button
-          onclick={() => selectedCategory = cat.id as any}
-          class="px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors whitespace-nowrap cursor-pointer {selectedCategory === cat.id ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold shadow-sm' : 'bg-neutral-900 border border-white/5 text-neutral-400 hover:text-white'}"
-        >
-          {cat.label}
-        </button>
-      {/each}
+  <!-- View Mode Switcher: Presets vs Oklab Color Wheel -->
+  <div class="flex-none flex items-center justify-between gap-2 py-1 border-b border-white/5">
+    <div class="flex items-center gap-1 spatial-glass p-0.5 rounded-xl border border-white/10 text-[10px]">
+      <button
+        type="button"
+        onclick={() => viewMode = 'presets'}
+        class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg transition-all font-semibold cursor-pointer {viewMode === 'presets' ? 'bg-cyan-500/25 text-cyan-300 border border-cyan-500/40 shadow-sm' : 'text-neutral-400 hover:text-white'}"
+      >
+        <Palette size={12} />
+        <span>Hazır LUT / Filtre</span>
+      </button>
+      <button
+        type="button"
+        onclick={() => viewMode = 'color_wheel'}
+        class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg transition-all font-semibold cursor-pointer {viewMode === 'color_wheel' ? 'bg-cyan-500/25 text-cyan-300 border border-cyan-500/40 shadow-sm' : 'text-neutral-400 hover:text-white'}"
+      >
+        <CircleDot size={12} />
+        <span>Oklab Renk Çarkı</span>
+      </button>
     </div>
-
-    <button
-      type="button"
-      onclick={() => scrollCategories(120)}
-      class="flex-none p-1 rounded-lg bg-neutral-900/90 hover:bg-neutral-800 text-neutral-400 hover:text-white border border-white/10 active:scale-95 transition-all shadow-sm cursor-pointer"
-      title="Sağa Kaydır"
-    >
-      <ChevronRight size={13} />
-    </button>
   </div>
 
-  <!-- Main Scrollable Area: Presets & Live Fine-Tuning Sliders -->
+  {#if viewMode === 'presets'}
+    <!-- Category Pills (Horizontal scroll with Smooth Left/Right Arrow Navigation) -->
+    <div class="flex-none flex items-center gap-1 py-1.5 relative w-full">
+      <button
+        type="button"
+        onclick={() => scrollCategories(-120)}
+        class="flex-none p-1 rounded-lg bg-neutral-900/90 hover:bg-neutral-800 text-neutral-400 hover:text-white border border-white/10 active:scale-95 transition-all shadow-sm cursor-pointer"
+        title="Sola Kaydır"
+      >
+        <ChevronLeft size={13} />
+      </button>
+
+      <div 
+        bind:this={categoryScrollRef}
+        class="flex-1 flex items-center gap-1.5 overflow-x-auto scroll-smooth no-scrollbar [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] px-0.5"
+      >
+        {#each [
+          { id: 'all', label: 'Tümü' },
+          { id: 'cinematic', label: 'Sinematik' },
+          { id: 'creative', label: 'Yaratıcı' },
+          { id: 'vintage', label: 'Nostalji 90s' },
+          { id: 'clean', label: 'Temiz / Reklam' }
+        ] as cat}
+          <button
+            onclick={() => selectedCategory = cat.id as any}
+            class="px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors whitespace-nowrap cursor-pointer {selectedCategory === cat.id ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold shadow-sm' : 'bg-neutral-900 border border-white/5 text-neutral-400 hover:text-white'}"
+          >
+            {cat.label}
+          </button>
+        {/each}
+      </div>
+
+      <button
+        type="button"
+        onclick={() => scrollCategories(120)}
+        class="flex-none p-1 rounded-lg bg-neutral-900/90 hover:bg-neutral-800 text-neutral-400 hover:text-white border border-white/10 active:scale-95 transition-all shadow-sm cursor-pointer"
+        title="Sağa Kaydır"
+      >
+        <ChevronRight size={13} />
+      </button>
+    </div>
+  {/if}
+
+  <!-- Main Scrollable Area: Presets or Color Wheel & Live Fine-Tuning Sliders -->
   <div 
     onscroll={handleContainerScroll}
     class="flex-1 overflow-y-auto space-y-3 custom-scrollbar min-h-0 pr-1 transition-all"
   >
-    
-    <!-- Presets Grid / Horizontal Scroll for Mobile -->
-    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
+    {#if viewMode === 'color_wheel'}
+      <!-- Oklab Color Wheel Interactive Section -->
+      {#if selectedClip}
+        {@const grading = selectedClip.colorGrading || { brightness: 0, contrast: 1, saturation: 1, temperature: 0, tint: 0 }}
+        {@const wheelVal = {
+          l: Math.max(0.2, Math.min(1, 0.5 + (grading.brightness || 0) / 0.8)),
+          a: grading.tint || 0,
+          b: grading.temperature || 0
+        }}
+        <div class="p-3.5 rounded-2xl bg-neutral-900/60 border border-white/10 flex flex-col sm:flex-row items-center justify-around gap-4 animate-in fade-in duration-200">
+          <OklabColorWheel 
+            value={wheelVal}
+            onChange={(val) => {
+              updateColorParam('temperature', Number(val.b.toFixed(3)));
+              updateColorParam('tint', Number(val.a.toFixed(3)));
+              updateColorParam('brightness', Number(((val.l - 0.5) * 0.8).toFixed(3)));
+            }}
+          />
+          <div class="w-full sm:max-w-xs space-y-2 text-xs">
+            <span class="text-[10px] font-mono uppercase tracking-wider text-cyan-400 font-bold block">Oklab Renk Koordinatları</span>
+            <div class="flex items-center justify-between p-2 rounded-xl bg-neutral-950/70 border border-white/5 font-mono text-[11px]">
+              <span class="text-neutral-400">Yeşil / Magenta (a):</span>
+              <span class="text-purple-300 font-bold font-mono">{(grading.tint || 0).toFixed(3)}</span>
+            </div>
+            <div class="flex items-center justify-between p-2 rounded-xl bg-neutral-950/70 border border-white/5 font-mono text-[11px]">
+              <span class="text-neutral-400">Mavi / Sarı Sıcaklık (b):</span>
+              <span class="text-amber-300 font-bold font-mono">{(grading.temperature || 0).toFixed(3)}</span>
+            </div>
+            <div class="flex items-center justify-between p-2 rounded-xl bg-neutral-950/70 border border-white/5 font-mono text-[11px]">
+              <span class="text-neutral-400">Pozlama / Işık (L):</span>
+              <span class="text-cyan-300 font-bold font-mono">{(grading.brightness || 0).toFixed(2)}</span>
+            </div>
+            <p class="text-[10px] text-neutral-500 italic">Çark üzerinde noktayı kaydırarak sinematik renk derecelendirmesini canlı uygulayın.</p>
+          </div>
+        </div>
+      {:else}
+        <div class="p-6 text-center text-neutral-400 text-xs rounded-xl bg-neutral-900/40 border border-white/5">
+          Oklab Renk Çarkı ile canlı derecelendirme yapmak için lütfen zaman çizelgesinden bir video klibi seçin.
+        </div>
+      {/if}
+    {:else}
+      <!-- Presets Grid / Horizontal Scroll for Mobile -->
+      <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
       {#each filteredPresets as preset}
         {@const isCurrent = selectedClip?.colorGrading?.lut === preset.grading.lut}
         <button
@@ -298,6 +368,7 @@
         </button>
       {/each}
     </div>
+    {/if}
 
     <!-- Quick Live Adjustment Sliders (When a clip is selected) -->
     {#if selectedClip}

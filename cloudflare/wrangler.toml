@@ -1,0 +1,22 @@
+name = "toolx-video-editor-router"
+main = "worker.js"
+compatibility_date = "2026-03-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Cloudflare Route Yapılandırması (toolx.com.tr)
+# Worker hem /video-editor hem de /video-editör alt yollarına düşen istekleri yakalar.
+routes = [
+  { pattern = "toolx.com.tr/video-editor*", zone_name = "toolx.com.tr" },
+  { pattern = "toolx.com.tr/video-editör*", zone_name = "toolx.com.tr" }
+]
+
+# Cloudflare Workers Static Assets (Wrangler v3.57+ / 2026 Standartları)
+# Projenin derlenmiş `dist` klasörünü doğrudan Cloudflare Edge CDN üzerinden sunar.
+[assets]
+directory = "../dist"
+binding = "ASSETS"
+html_handling = "auto-trailing-slash"
+not_found_handling = "single-page-application"
+
+[vars]
+SUBPATH_PREFIX = "/video-editor"

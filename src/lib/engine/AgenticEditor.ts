@@ -412,8 +412,13 @@ export class AgenticEditor {
     if (
       p.includes('ai merkezi') ||
       p.includes('kontrol merkezi') ||
+      p.includes('ai paneli') ||
+      p.includes('ai kontrol') ||
+      p.includes('model hub') ||
+      p.includes('ai hub') ||
       p.includes('modeller') ||
-      p.includes('lisans')
+      p.includes('lisans') ||
+      p.includes('yapay zeka merkezi')
     ) {
       return {
         action: 'OPEN_AI_CENTER',

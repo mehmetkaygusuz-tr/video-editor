@@ -1,6 +1,7 @@
 <script lang="ts">
   import { editor } from '../editor.svelte';
   import { aiService } from '../engine/aiService.svelte';
+  import { agenticEditor } from '../engine/AgenticEditor';
   import { saveFileToOPFS } from '../opfs';
   import { MAGIC_TEMPLATES } from '../templates';
   import { FILTER_PRESETS } from '../filters';
@@ -8,7 +9,7 @@
   import { 
     FolderClosed, Sparkles, SlidersHorizontal as Sliders, Type, Upload, Plus, Trash as Trash2, 
     Scissors, Volume2, Music, Crop, Layers, Cpu, Check, 
-    RotateCcw, Play, ShieldCheck, FastForward, Film, Image as ImageIcon, X, Gauge, Wand2, Palette
+    RotateCcw, Play, ShieldCheck, FastForward, Film, Image as ImageIcon, X, Gauge, Wand2, Palette, ChevronRight
   } from '@lucide/svelte';
 
   let { onClose, isMobileSheet = false, hideTabs = false }: { onClose?: () => void; isMobileSheet?: boolean; hideTabs?: boolean } = $props();
@@ -366,6 +367,27 @@
             </div>
           </div>
         </div>
+
+        <!-- AI Hub & Models Quick Launcher -->
+        <button
+          onclick={() => { aiService.isPanelOpen = true; editor.triggerHaptic('light'); }}
+          class="w-full p-2.5 bg-gradient-to-r from-purple-900/40 via-blue-900/40 to-cyan-900/40 border border-purple-500/30 hover:border-purple-400/60 rounded-xl text-left flex items-center justify-between transition-all group cursor-pointer shadow-lg"
+          title="Tüm Yerel Modeller, Donanım Hızlandırma & Lisanslar"
+        >
+          <div class="flex items-center gap-2.5">
+            <div class="w-8 h-8 rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/40 flex items-center justify-center group-hover:scale-105 transition-transform flex-none">
+              <Sparkles size={16} class="animate-pulse" />
+            </div>
+            <div>
+              <div class="text-xs font-bold text-white group-hover:text-purple-200 transition-colors flex items-center gap-1.5">
+                AI Üretim Merkezi
+                <span class="text-[9px] font-mono px-1 py-0.2 bg-emerald-500/20 text-emerald-300 border border-emerald-500/30 rounded">HUB</span>
+              </div>
+              <div class="text-[10px] text-neutral-400">Model durumları, yerel WebGPU & lisanslar</div>
+            </div>
+          </div>
+          <ChevronRight size={14} class="text-neutral-500 group-hover:text-white group-hover:translate-x-0.5 transition-all flex-none" />
+        </button>
 
         <!-- AI Assistant: Natural Language Command Trigger -->
         <div class="p-3 bg-gradient-to-br from-indigo-950/40 to-purple-950/30 border border-indigo-500/30 rounded-xl space-y-2">
@@ -892,7 +914,6 @@
             }
 
             if (selectedTemplateId && audioId) {
-              const { agenticEditor } = await import('../engine/AgenticEditor');
               await agenticEditor.applyTemplate(selectedTemplateId, audioId, vIds);
             }
           }}

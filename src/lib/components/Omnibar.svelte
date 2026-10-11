@@ -161,6 +161,12 @@
           <button
             type="button"
             onclick={() => {
+              if (chip.cmd === 'AI kontrol merkezini aç') {
+                aiService.isPanelOpen = true;
+                editor.isCommandPaletteOpen = false;
+                editor.triggerHaptic('light');
+                return;
+              }
               prompt = chip.cmd;
               handleSubmit();
             }}

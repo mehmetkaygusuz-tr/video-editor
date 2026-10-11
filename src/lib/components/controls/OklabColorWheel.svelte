@@ -1,16 +1,24 @@
 <script lang="ts">
   import { onMount } from 'svelte';
 
-  // Props
-  export let value = { l: 0.7, a: 0.0, b: 0.0 };
-  export let onChange: (val: { l: number; a: number; b: number }) => void = () => {};
+  let {
+    value = { l: 0.7, a: 0.0, b: 0.0 },
+    onChange = () => {}
+  }: {
+    value?: { l: number; a: number; b: number };
+    onChange?: (val: { l: number; a: number; b: number }) => void;
+  } = $props();
 
-  let canvasRef: HTMLCanvasElement;
-  let isDragging = false;
-  const size = 160;
+  let canvasRef = $state<HTMLCanvasElement | null>(null);
+  let isDragging = $state(false);
+  const size = 150;
   const radius = size / 2;
 
-  // Oklab to sRGB conversion (approximate for display)
+  let currentA = $derived(value.a ?? 0.0);
+  let currentB = $derived(value.b ?? 0.0);
+  let currentL = $derived(value.l ?? 0.7);
+
+  // Oklab to sRGB conversion for display
   function oklabToSrgb(l: number, a: number, b: number) {
     const l_ = l + 0.3963377774 * a + 0.2158037573 * b;
     const m_ = l - 0.1055613458 * a - 0.0638541728 * b;
@@ -55,11 +63,11 @@
           continue;
         }
 
-        // Map x,y to a,b in Oklab space (a,b typically range -0.4 to 0.4)
+        // Map x,y to a,b in Oklab space (-0.4 to 0.4)
         const a = (dx / radius) * 0.4;
         const b = (dy / radius) * 0.4;
 
-        const rgb = oklabToSrgb(value.l, a, b);
+        const rgb = oklabToSrgb(currentL, a, b);
         
         data[idx] = rgb.r;
         data[idx + 1] = rgb.g;
@@ -74,12 +82,15 @@
     renderWheel();
   });
 
-  // Re-render when Lightness (l) changes
-  $: if (value.l !== undefined) {
-    renderWheel();
-  }
+  $effect(() => {
+    // Re-render when Lightness changes
+    if (currentL !== undefined && canvasRef) {
+      renderWheel();
+    }
+  });
 
   function handlePointerDown(e: PointerEvent) {
+    if (!canvasRef) return;
     isDragging = true;
     updateFromPointer(e);
     canvasRef.setPointerCapture(e.pointerId);
@@ -91,12 +102,15 @@
   }
 
   function handlePointerUp(e: PointerEvent) {
-    if (!isDragging) return;
+    if (!isDragging || !canvasRef) return;
     isDragging = false;
-    canvasRef.releasePointerCapture(e.pointerId);
+    try {
+      canvasRef.releasePointerCapture(e.pointerId);
+    } catch (_) {}
   }
 
   function updateFromPointer(e: PointerEvent) {
+    if (!canvasRef) return;
     const rect = canvasRef.getBoundingClientRect();
     let x = e.clientX - rect.left - radius;
     let y = e.clientY - rect.top - radius;
@@ -110,45 +124,47 @@
     const newA = (x / radius) * 0.4;
     const newB = (y / radius) * 0.4;
 
-    value = { ...value, a: newA, b: newB };
-    onChange(value);
+    onChange({ l: currentL, a: newA, b: newB });
   }
 
-  // Thumb position
-  $: thumbX = radius + (value.a / 0.4) * radius;
-  $: thumbY = radius + (value.b / 0.4) * radius;
+  let thumbX = $derived(radius + (currentA / 0.4) * radius);
+  let thumbY = $derived(radius + (currentB / 0.4) * radius);
 </script>
 
-<div class="flex flex-col items-center gap-4">
+<div class="flex flex-col items-center gap-3 select-none">
   <div class="relative" style="width: {size}px; height: {size}px;">
-    <!-- svelte-ignore a11y-no-noninteractive-element-interactions -->
+    <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
     <canvas
       bind:this={canvasRef}
       width={size}
       height={size}
-      class="rounded-full shadow-inner cursor-crosshair"
-      on:pointerdown={handlePointerDown}
-      on:pointermove={handlePointerMove}
-      on:pointerup={handlePointerUp}
-      on:pointercancel={handlePointerUp}
+      class="rounded-full shadow-[0_0_20px_rgba(0,0,0,0.6)] border border-white/10 cursor-crosshair touch-none"
+      onpointerdown={handlePointerDown}
+      onpointermove={handlePointerMove}
+      onpointerup={handlePointerUp}
+      onpointercancel={handlePointerUp}
     ></canvas>
+    
+    <!-- Active color pointer indicator -->
     <div 
-      class="absolute w-4 h-4 -ml-2 -mt-2 border-2 border-white rounded-full shadow-md pointer-events-none"
-      style="left: {thumbX}px; top: {thumbY}px; background-color: rgba(255,255,255,0.2);"
+      class="absolute w-4 h-4 -ml-2 -mt-2 border-2 border-white rounded-full shadow-[0_0_8px_rgba(0,0,0,0.8)] pointer-events-none transition-transform duration-75"
+      style="left: {thumbX}px; top: {thumbY}px; background-color: rgba(255,255,255,0.4);"
     ></div>
   </div>
 
-  <div class="w-full px-2">
-    <div class="flex justify-between text-[10px] text-neutral-400 mb-1">
-      <span>Parlaklık (Luminance)</span>
-      <span class="font-mono">{Math.round(value.l * 100)}%</span>
+  <div class="w-full max-w-[200px] px-1 space-y-1">
+    <div class="flex justify-between text-[10px] text-neutral-400 font-mono">
+      <span>Açıklık / Işık (L)</span>
+      <span class="text-cyan-400 font-semibold">{Math.round(currentL * 100)}%</span>
     </div>
     <input 
       type="range" 
-      min="0" max="1" step="0.01" 
-      bind:value={value.l}
-      on:input={() => onChange(value)}
-      class="w-full accent-blue-500 h-1.5 bg-neutral-800 rounded outline-none"
+      min="0.2" 
+      max="1" 
+      step="0.01" 
+      value={currentL}
+      oninput={(e) => onChange({ l: parseFloat((e.target as HTMLInputElement).value), a: currentA, b: currentB })}
+      class="w-full accent-cyan-400 h-1.5 bg-neutral-800 rounded appearance-none cursor-pointer"
     />
   </div>
 </div>

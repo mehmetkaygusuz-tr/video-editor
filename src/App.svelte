@@ -518,7 +518,7 @@
     <div class="flex items-center gap-3">
       <div class="flex items-center gap-2.5">
         <button type="button" class="relative group cursor-pointer focus:outline-none" onclick={() => editor.isSettingsModalOpen = true} title="Proje Ayarları">
-          <img src="/logo-icon.png" alt="Logo" class="h-8 w-8 sm:h-9 sm:w-9 object-contain rounded-xl p-0.5 bg-neutral-900/90 border border-white/15 shadow-[0_0_16px_rgba(139,92,246,0.35)] transition-transform group-hover:scale-105" />
+          <img src="logo-icon.png" alt="Logo" class="h-8 w-8 sm:h-9 sm:w-9 object-contain rounded-xl p-0.5 bg-neutral-900/90 border border-white/15 shadow-[0_0_16px_rgba(139,92,246,0.35)] transition-transform group-hover:scale-105" />
           <div class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-400 border-2 border-neutral-900 rounded-full shadow-[0_0_8px_#34d399]"></div>
         </button>
         <div class="flex flex-col">
@@ -559,22 +559,33 @@
           <span class="text-[10px] font-mono text-purple-300 font-bold">{aiService.progress}%</span>
         </div>
       {:else}
-        <button
-          onclick={() => editor.isCommandPaletteOpen = true}
-          class="flex items-center gap-2.5 px-3.5 py-1.5 rounded-full spatial-glass hover:spatial-glass-active transition-all duration-200 group cursor-pointer dynamic-island-glow"
-          title="AI Stüdyo Direktörü (⌘K veya Ctrl+K)"
-        >
-          <div class="w-6 h-6 rounded-full bg-gradient-to-tr from-purple-600 to-cyan-500 flex items-center justify-center text-white shadow-sm group-hover:scale-105 transition-transform">
-            <Sparkles size={12} class="animate-pulse" />
-          </div>
-          <div class="flex items-center gap-2 text-xs">
-            <span class="font-medium text-neutral-200 group-hover:text-white transition-colors">AI Direktör</span>
-            <span class="text-neutral-500 text-[11px] hidden xl:inline">"Sessizlikleri sil", "Altyazı üret", "Ritim kesimi"</span>
-          </div>
-          <div class="flex items-center gap-1 pl-1">
-            <kbd class="px-1.5 py-0.5 text-[9px] font-mono font-semibold bg-white/10 border border-white/10 rounded text-neutral-300 shadow-sm">⌘K</kbd>
-          </div>
-        </button>
+        <div class="flex items-center gap-1.5">
+          <button
+            onclick={() => editor.isCommandPaletteOpen = true}
+            class="flex items-center gap-2.5 px-3.5 py-1.5 rounded-full spatial-glass hover:spatial-glass-active transition-all duration-200 group cursor-pointer dynamic-island-glow"
+            title="AI Stüdyo Direktörü (⌘K veya Ctrl+K)"
+          >
+            <div class="w-6 h-6 rounded-full bg-gradient-to-tr from-purple-600 to-cyan-500 flex items-center justify-center text-white shadow-sm group-hover:scale-105 transition-transform">
+              <Sparkles size={12} class="animate-pulse" />
+            </div>
+            <div class="flex items-center gap-2 text-xs">
+              <span class="font-medium text-neutral-200 group-hover:text-white transition-colors">AI Direktör</span>
+              <span class="text-neutral-500 text-[11px] hidden xl:inline">"Sessizlikleri sil", "Altyazı üret", "Ritim kesimi"</span>
+            </div>
+            <div class="flex items-center gap-1 pl-1">
+              <kbd class="px-1.5 py-0.5 text-[9px] font-mono font-semibold bg-white/10 border border-white/10 rounded text-neutral-300 shadow-sm">⌘K</kbd>
+            </div>
+          </button>
+
+          <button
+            onclick={() => { aiService.isPanelOpen = true; editor.triggerHaptic('light'); }}
+            class="hidden lg:flex items-center gap-1 px-2.5 py-1.5 rounded-full spatial-glass hover:spatial-glass-active text-purple-300 hover:text-white text-xs transition-all cursor-pointer dynamic-island-glow"
+            title="Yapay Zeka Üretim Merkezi (Yerel Modeller & Lisanslar)"
+          >
+            <Cpu size={12} class="text-purple-400" />
+            <span class="text-[11px] font-medium">Model Hub</span>
+          </button>
+        </div>
       {/if}
     </div>
 
