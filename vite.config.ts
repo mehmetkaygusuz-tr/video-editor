@@ -1,12 +1,42 @@
-import { defineConfig } from 'vite';
+import { defineConfig, type Plugin } from 'vite';
 import { svelte } from '@sveltejs/vite-plugin-svelte';
 import tailwindcss from '@tailwindcss/vite';
+import fs from 'node:fs';
+import path from 'node:path';
+
+/**
+ * Cloudflare Pages 25 MiB sınırını aşan ve modern tarayıcılarda WebGPU varken
+ * hiçbir zaman kullanılmayan Emscripten fallback wasm dosyasını derleme sonrasında temizler.
+ */
+function cleanOversizedWasm(): Plugin {
+  return {
+    name: 'clean-oversized-wasm',
+    closeBundle() {
+      const distAssetsDir = path.resolve(process.cwd(), 'dist/assets');
+      if (fs.existsSync(distAssetsDir)) {
+        const files = fs.readdirSync(distAssetsDir);
+        for (const file of files) {
+          if (file.includes('asyncify') && file.endsWith('.wasm')) {
+            const filePath = path.join(distAssetsDir, file);
+            try {
+              fs.unlinkSync(filePath);
+              console.log(`\n✓ [Cloudflare Optimization] Removed unused fallback WASM: ${file}`);
+            } catch (err) {
+              console.warn(`[Cloudflare Optimization] Could not remove ${file}:`, err);
+            }
+          }
+        }
+      }
+    }
+  };
+}
 
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [
     tailwindcss(),
-    svelte()
+    svelte(),
+    cleanOversizedWasm()
   ],
   server: {
     port: 3000,
