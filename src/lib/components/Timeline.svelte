@@ -168,11 +168,13 @@
       editor.renderFrameDirty = true;
     }
 
-    // Double tap detection on clip to quick-open bottom docked filters
+    // Double tap / double click detection on clip to seek playhead to clip start (NLE Standard)
     const now = performance.now();
     if (lastClipTapId === clip.id && (now - lastClipTapTime) < 300) {
-      editor.mobileWorkspace = 'filters';
-      editor.triggerHaptic('medium');
+      editor.seekTo(clip.startAt);
+      scheduleSettleSeek();
+      editor.renderFrameDirty = true;
+      editor.triggerHaptic('light');
       lastClipTapId = '';
       lastClipTapTime = 0;
     } else {

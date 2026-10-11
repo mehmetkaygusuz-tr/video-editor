@@ -128,8 +128,8 @@
   }
 
   function handleClose() {
+    editor.mobileWorkspace = 'timeline';
     if (onClose) onClose();
-    else editor.mobileWorkspace = 'timeline';
   }
 </script>
 
@@ -185,15 +185,16 @@
         <RotateCcw size={13} />
       </button>
 
-      {#if !isBottomDocked}
-        <button
-          onclick={handleClose}
-          class="p-1.5 rounded-xl bg-neutral-800/80 hover:bg-neutral-800 text-neutral-400 hover:text-white transition-colors cursor-pointer"
-          title="Kapat"
-        >
-          <X size={14} />
-        </button>
-      {/if}
+      <button
+        onclick={handleClose}
+        class="p-1.5 rounded-xl bg-neutral-800/80 hover:bg-neutral-800 text-neutral-400 hover:text-white transition-colors cursor-pointer flex items-center gap-1"
+        title="Filtreleri Kapat (Zaman Çizelgesine Dön)"
+      >
+        <X size={14} />
+        {#if isBottomDocked}
+          <span class="text-[10px] hidden xs:inline font-semibold">Kapat</span>
+        {/if}
+      </button>
     </div>
   </div>
 

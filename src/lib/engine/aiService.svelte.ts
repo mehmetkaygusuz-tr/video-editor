@@ -887,6 +887,7 @@ export class AIService {
 
       targetClip.isBgRemoved = true;
       targetClip.color = '#ec4899'; // Highlight with pink AI badge
+      editor.renderFrameDirty = true;
       editor.saveState();
       editor.announce(`"${targetClip.name}" klibinin arka planı kaldırıldı.`);
 
@@ -972,6 +973,8 @@ export class AIService {
         w: midFrame ? midFrame.width : 0.316,
         h: 1.0
       };
+      editor.aspectRatio = '9:16';
+      editor.renderFrameDirty = true;
       editor.saveState();
       editor.announce(`"${targetClip.name}" klibi 9:16 dikey formata uyarlandı.`);
 
@@ -1025,6 +1028,7 @@ export class AIService {
         lut: 'teal-orange'
       };
 
+      editor.renderFrameDirty = true;
       editor.saveState();
       this.progress = 100;
       this.isRunning = false;

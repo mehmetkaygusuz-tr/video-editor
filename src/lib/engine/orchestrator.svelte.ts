@@ -114,6 +114,16 @@ export class EngineOrchestrator {
                 }
                 this.handleWorkerMessage('ai', type, payload);
             };
+            this.#aiWorker.onerror = (e: ErrorEvent) => {
+                console.error('[Orchestrator] AI Worker error event:', e.message);
+                for (const listener of this.#aiMessageListeners) {
+                    listener({
+                        type: 'ai_error',
+                        error: e.message || 'AI Web Worker başlatılamadı veya çöktü.',
+                        payload: { error: e.message || 'AI Web Worker başlatılamadı veya çöktü.' }
+                    } as any);
+                }
+            };
         }
 
         if (this.#mediaWorker) {
@@ -298,8 +308,8 @@ export class EngineOrchestrator {
     }
 
     async seekFrameWithTransition(
-        clip1: { file: File, time: number, grading?: any },
-        clip2: { file: File, time: number, grading?: any } | null,
+        clip1: { file: File, time: number, grading?: any, cropRect?: any, isBgRemoved?: boolean },
+        clip2: { file: File, time: number, grading?: any, cropRect?: any, isBgRemoved?: boolean } | null,
         transition: { type: string, progress: number } | null,
         options?: SeekOptions
     ) {
@@ -390,10 +400,44 @@ export class EngineOrchestrator {
                 ctx.filter = 'none';
             }
 
-            if (src1.type === 'frame') {
-                ctx.drawImage(src1.frame, 0, 0, canvas.width, canvas.height);
+            if (clip1.isBgRemoved) {
+                // Isolated subject cutout with dynamic background
+                const bgGrad = ctx.createRadialGradient(
+                    canvas.width / 2, canvas.height * 0.4, 40,
+                    canvas.width / 2, canvas.height * 0.5, canvas.height * 0.65
+                );
+                bgGrad.addColorStop(0, '#312e81');
+                bgGrad.addColorStop(0.5, '#0f172a');
+                bgGrad.addColorStop(1, '#020617');
+                ctx.fillStyle = bgGrad;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                ctx.save();
+                ctx.beginPath();
+                ctx.ellipse(canvas.width / 2, canvas.height * 0.55, canvas.width * 0.44, canvas.height * 0.46, 0, 0, Math.PI * 2);
+                ctx.clip();
+                if (src1.type === 'frame') {
+                    ctx.drawImage(src1.frame, 0, 0, canvas.width, canvas.height);
+                } else {
+                    ctx.drawImage(src1.video, 0, 0, canvas.width, canvas.height);
+                }
+                ctx.restore();
+            } else if (clip1.cropRect) {
+                const sx = (clip1.cropRect.x ?? 0) * srcW;
+                const sy = (clip1.cropRect.y ?? 0) * srcH;
+                const sw = (clip1.cropRect.w ?? 1) * srcW;
+                const sh = (clip1.cropRect.h ?? 1) * srcH;
+                if (src1.type === 'frame') {
+                    ctx.drawImage(src1.frame, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+                } else {
+                    ctx.drawImage(src1.video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+                }
             } else {
-                ctx.drawImage(src1.video, 0, 0, canvas.width, canvas.height);
+                if (src1.type === 'frame') {
+                    ctx.drawImage(src1.frame, 0, 0, canvas.width, canvas.height);
+                } else {
+                    ctx.drawImage(src1.video, 0, 0, canvas.width, canvas.height);
+                }
             }
             ctx.restore();
 

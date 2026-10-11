@@ -5,7 +5,7 @@ import { FilesetResolver, FaceDetector } from '@mediapipe/tasks-vision';
 
 env.allowLocalModels = false;
 if (env.backends?.onnx?.wasm) {
-  env.backends.onnx.wasm.proxy = true; // Use proxy for webgpu if available
+  env.backends.onnx.wasm.proxy = false; // Inside web worker: execute directly, do not spawn nested proxy
 }
 
 function notifyProgress(taskId: string, feature: string, progress: number, message: string) {
@@ -97,7 +97,11 @@ self.onmessage = async (e: MessageEvent) => {
       let resultText = '';
       let subtitles: Array<{ id: string; text: string; start: number; end: number; words?: any[] }> = [];
 
-      if (transcriber && audioData && audioData.length > 0) {
+      if (!transcriber) {
+        throw new Error('Whisper modeli başlatılamadı veya indirilemedi.');
+      }
+
+      if (audioData && audioData.length > 0) {
         try {
           // transformers.js Float32Array 16kHz ses bekler (W3C standardı)
           const result = await transcriber(audioData, {
@@ -187,7 +191,8 @@ self.onmessage = async (e: MessageEvent) => {
             }
           }
         } catch (transErr: any) {
-          notifyLog(`Whisper transkripsiyon inferansı hatası: ${transErr?.message || transErr}`, 'warn');
+          notifyLog(`Whisper transkripsiyon inferansı hatası: ${transErr?.message || transErr}`, 'error');
+          throw transErr;
         }
       }
 
@@ -625,4 +630,12 @@ self.onmessage = async (e: MessageEvent) => {
     notifyLog(`Worker işlem hatası: ${error?.message || error}`, 'error');
     sendError(taskId, error);
   }
+};
+
+self.onerror = (e) => {
+  console.error('[ai.worker] Global worker unhandled error:', e);
+};
+
+self.onunhandledrejection = (e) => {
+  console.error('[ai.worker] Global worker unhandled rejection:', e.reason);
 };

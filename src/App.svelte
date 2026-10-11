@@ -450,8 +450,20 @@
             const [file1, file2] = await Promise.all([getFile(asset1), getFile(asset2)]);
             if (file1) {
               lastVideoSeekTime = targetTime1;
-              const clip1Info = { file: file1, time: targetTime1, grading: topClip.colorGrading };
-              const clip2Info = (file2 && bottomClip) ? { file: file2, time: targetTime2, grading: bottomClip.colorGrading } : null;
+              const clip1Info = { 
+                file: file1, 
+                time: targetTime1, 
+                grading: topClip.colorGrading,
+                cropRect: topClip.cropRect,
+                isBgRemoved: topClip.isBgRemoved
+              };
+              const clip2Info = (file2 && bottomClip) ? { 
+                file: file2, 
+                time: targetTime2, 
+                grading: bottomClip.colorGrading,
+                cropRect: bottomClip.cropRect,
+                isBgRemoved: bottomClip.isBgRemoved
+              } : null;
               const seekMode = 'exact' as const;
               await engine.seekFrameWithTransition(clip1Info, clip2Info, transition, { mode: seekMode });
               if (isPlaying) {
@@ -1244,8 +1256,12 @@
         {#if editor.mobileWorkspace === 'timeline'}
           <Timeline />
         {:else if editor.mobileWorkspace === 'filters'}
-          <div class="flex-1 overflow-hidden flex flex-col h-full w-full">
+          <div class="flex-1 lg:hidden overflow-hidden flex flex-col h-full w-full">
             <FiltersSheet isBottomDocked={true} onClose={() => { editor.mobileWorkspace = 'timeline'; }} />
+          </div>
+          <!-- On desktop, always show timeline -->
+          <div class="hidden lg:flex flex-1 w-full h-full">
+            <Timeline />
           </div>
         {:else}
           <!-- Mobile workspace panel swapping logic (hidden on lg, takes timeline spot) -->
