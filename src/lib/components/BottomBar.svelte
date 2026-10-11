@@ -8,7 +8,7 @@
     Gauge, Sliders, Palette, Zap, Undo2, Redo2, Magnet, Play, Pause, Wand2
   } from '@lucide/svelte';
 
-  let selectedClip = $derived(editor.getSelectedClip());
+  let selectedClip = $derived(editor.selectedClip);
   let scrollContainerRef = $state<HTMLDivElement | null>(null);
 
   // Quick speed options

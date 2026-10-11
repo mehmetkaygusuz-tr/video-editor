@@ -5,7 +5,7 @@
   import { appState } from '../appState.svelte';
   import OklabColorWheel from './controls/OklabColorWheel.svelte';
   
-  let selectedClip = $derived(editor.getSelectedClip());
+  let selectedClip = $derived(editor.selectedClip);
 </script>
 
 <aside class="@container w-full h-full flex flex-col bg-transparent overflow-y-auto p-3.5 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">

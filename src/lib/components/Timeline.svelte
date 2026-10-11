@@ -838,17 +838,19 @@
   $effect(() => {
     if (editor.isPlaying && !isDraggingPlayhead && !isPanning && activePointers.size === 0) {
       const playheadPx = editor.playhead * editor.zoom;
-      if (isMobileMode && containerWidth > 0) {
-        editor.scrollX = Math.max(0, playheadPx - (containerWidth / 2));
-      } else if (containerWidth > 0) {
-        const visibleLeft = editor.scrollX;
-        const visibleRight = editor.scrollX + containerWidth - effectiveHeaderWidth;
-        if (playheadPx > visibleRight - 60) {
-          editor.scrollX = Math.max(0, playheadPx - 100);
-        } else if (playheadPx < visibleLeft) {
-          editor.scrollX = Math.max(0, playheadPx - 50);
+      untrack(() => {
+        if (isMobileMode && containerWidth > 0) {
+          editor.scrollX = Math.max(0, playheadPx - (containerWidth / 2));
+        } else if (containerWidth > 0) {
+          const visibleLeft = editor.scrollX;
+          const visibleRight = editor.scrollX + containerWidth - effectiveHeaderWidth;
+          if (playheadPx > visibleRight - 60) {
+            editor.scrollX = Math.max(0, playheadPx - 100);
+          } else if (playheadPx < visibleLeft) {
+            editor.scrollX = Math.max(0, playheadPx - 50);
+          }
         }
-      }
+      });
     }
   });
 </script>

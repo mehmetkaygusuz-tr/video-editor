@@ -15,7 +15,7 @@
   let viewMode = $state<'presets' | 'color_wheel'>('presets');
   let selectedCategory = $state<'all' | 'cinematic' | 'creative' | 'vintage' | 'clean'>('all');
   let applyScope = $state<'selected' | 'all'>('selected');
-  let selectedClip = $derived(editor.getSelectedClip());
+  let selectedClip = $derived(editor.selectedClip);
 
   function scrollCategories(delta: number) {
     if (categoryScrollRef) {

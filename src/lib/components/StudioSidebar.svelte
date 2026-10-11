@@ -34,7 +34,7 @@
     { id: 'am_adam', name: 'Adam (Erkek - Derin Belgesel Tonu)' }
   ];
 
-  let selectedClip = $derived(editor.getSelectedClip());
+  let selectedClip = $derived(editor.selectedClip);
   let allSubtitles = $derived(
     editor.tracks.flatMap(t => t.clips.flatMap(c => (c.subtitles || []).map(s => ({ clipId: c.id, clipName: c.name, sub: s }))))
   );

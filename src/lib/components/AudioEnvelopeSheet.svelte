@@ -5,7 +5,7 @@
     Sparkles, Check, X, ArrowUpRight, ArrowDownRight, Layers
   } from '@lucide/svelte';
 
-  let selectedClip = $derived(editor.getSelectedClip());
+  let selectedClip = $derived(editor.selectedClip);
 
   let fadeIn = $state<number>(0);
   let fadeOut = $state<number>(0);

@@ -49,7 +49,7 @@
     return 'h-[26vh] lg:h-[22vh] min-h-[180px] opacity-100 flex flex-col';
   });
 
-  let selectedClip = $derived(editor.getSelectedClip());
+  let selectedClip = $derived(editor.selectedClip);
 
   // Real-time active subtitle overlay based on playhead with word highlighting
   let activeSubtitleInfo = $derived.by(() => {
@@ -517,6 +517,8 @@
 
     return () => {
       if (playLoopId) cancelAnimationFrame(playLoopId);
+      window.removeEventListener('pointerdown', unlockAudio);
+      window.removeEventListener('touchstart', unlockAudio);
     };
   });
 

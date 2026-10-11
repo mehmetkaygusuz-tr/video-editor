@@ -181,7 +181,7 @@ class VideoEditor {
   // Magnetic / Ripple Editing & Beat Markers
   isMagnetic = $state(true);
   snapToBeat = $state(true);
-  beatMarkers = $state<BeatMarker[]>([]);
+  beatMarkers = $state.raw<BeatMarker[]>([]);
   activeBpm = $state<number | null>(null);
   isProcessing = $state(false);
 
@@ -1479,6 +1479,10 @@ class VideoEditor {
     }
     this.triggerHaptic('light');
     this.announce(this.isPlaying ? 'Oynatma başlatıldı' : `Durduruldu (${this.playhead.toFixed(2)}s)`);
+  }
+
+  get selectedClip(): TimelineClip | undefined {
+    return this.getSelectedClip();
   }
 
   getSelectedClip(): TimelineClip | undefined {

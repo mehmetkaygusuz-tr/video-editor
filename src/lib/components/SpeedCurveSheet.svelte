@@ -7,7 +7,7 @@
     Volume2, Sliders, Play, Info
   } from '@lucide/svelte';
 
-  let selectedClip = $derived(editor.getSelectedClip());
+  let selectedClip = $derived(editor.selectedClip);
 
   let activePreset = $state<string>('none');
   let keepPitch = $state<boolean>(true);
