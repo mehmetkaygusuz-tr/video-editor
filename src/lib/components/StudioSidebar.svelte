@@ -89,10 +89,9 @@
     const duration = asset.duration || (asset.type === 'image' ? 5 : 10);
 
     if (asset.type === 'video') {
-      let vTrack = editor.tracks.find(t => t.name === 'V1' || t.name.startsWith('V'));
+      let vTrack = editor.tracks.find(t => t.type === 'video' || t.name === 'V1' || t.name.startsWith('V'));
       if (!vTrack) {
-        editor.addTrack('V1');
-        vTrack = editor.tracks[editor.tracks.length - 1];
+        vTrack = editor.addTrack('V1', 'video');
       }
       const lastClipEnd = vTrack.clips.reduce((max, clip) => Math.max(max, clip.startAt + clip.duration), 0);
       const startAt = Math.max(editor.playhead, lastClipEnd);
@@ -107,10 +106,9 @@
         { type: 'video' }
       );
 
-      let aTrack = editor.tracks.find(t => t.name === 'A1' || t.name.startsWith('A'));
+      let aTrack = editor.tracks.find(t => t.type === 'audio' || t.name === 'A1' || t.name.startsWith('A'));
       if (!aTrack) {
-        editor.addTrack('A1');
-        aTrack = editor.tracks[editor.tracks.length - 1];
+        aTrack = editor.addTrack('A1', 'audio');
       }
 
       editor.addClip(
@@ -125,14 +123,10 @@
 
       editor.announce(`"${asset.name}" video ve ses kanallarına eklendi.`);
     } else {
-      let targetTrack = editor.tracks.find(t => asset.type === 'audio' ? t.name.startsWith('A') : t.name.startsWith('V'));
-      if (!targetTrack && editor.tracks.length > 0) {
-        targetTrack = editor.tracks[0];
-      }
+      let targetTrack = editor.tracks.find(t => asset.type === 'audio' ? (t.type === 'audio' || t.name.startsWith('A')) : (t.type === 'video' || t.name.startsWith('V')));
       if (!targetTrack) {
         const trackName = asset.type === 'audio' ? 'A1' : 'V1';
-        editor.addTrack(trackName);
-        targetTrack = editor.tracks[editor.tracks.length - 1];
+        targetTrack = editor.addTrack(trackName, asset.type === 'audio' ? 'audio' : 'video');
       }
 
       const lastClipEnd = targetTrack.clips.reduce((max, clip) => Math.max(max, clip.startAt + clip.duration), 0);
@@ -191,7 +185,8 @@
         <span class="text-xs font-bold text-white uppercase tracking-wider">
           {#if editor.activeSidebarTab === 'media'}Medya Kütüphanesi
           {:else if editor.activeSidebarTab === 'ai'}Yapay Zeka Araçları
-          {:else if editor.activeSidebarTab === 'inspector'}Müfettiş / Ayarlar
+          {:else if editor.activeSidebarTab === 'templates'}Kurgu Şablonları
+          {:else if editor.activeSidebarTab === 'filters'}Renk Filtreleri
           {:else}Altyazı Yöneticisi{/if}
         </span>
       </div>
@@ -231,17 +226,6 @@
         >
           <Sparkles size={15} class="text-blue-400" />
           <span>AI Araçları</span>
-        </Tabs.Trigger>
-
-        <!-- Inspector Tab Button -->
-        <Tabs.Trigger
-          value="inspector"
-          onclick={() => editor.triggerHaptic('light')}
-          class="flex items-center gap-1.5 px-3 py-2 rounded-lg text-xs font-semibold transition-all min-h-[40px] focus-visible:ring-2 focus-visible:ring-blue-500 focus-visible:outline-none data-[state=active]:bg-neutral-800 data-[state=active]:text-white data-[state=active]:shadow-sm text-neutral-400 hover:text-white hover:bg-neutral-950 cursor-pointer"
-          title="Klip ve Proje Müfettişi"
-        >
-          <Sliders size={15} class={editor.activeSidebarTab === 'inspector' ? 'text-purple-400' : ''} />
-          <span>Müfettiş</span>
         </Tabs.Trigger>
 
         <!-- Captions Tab Button -->
@@ -391,20 +375,20 @@
                 <Sparkles size={14} />
               </div>
               <div>
-                <h4 class="text-xs font-bold text-white">Doğal Dille Kurgu</h4>
-                <span class="text-[10px] text-neutral-400">Yapay Zeka Komut Asistanı</span>
+                <h4 class="text-xs font-bold text-white">Yapay Zeka Komut Asistanı</h4>
+                <span class="text-[10px] text-neutral-400">Akıllı Video Asistanı</span>
               </div>
             </div>
-            <span class="text-[10px] bg-indigo-900/60 text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-700/50 font-mono">Cmd+K</span>
+            <span class="text-[10px] bg-indigo-900/60 text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-700/50 font-mono">⌘K</span>
           </div>
           <p class="text-[11px] text-neutral-300 leading-tight">
-            Videonuzu 'Sessizlikleri temizle', 'Altyazı üret', '2x hızlandır' gibi Türkçe cümlelerle kurgulayın.
+            Videonuzu 'Sessizlikleri sil', 'Altyazı üret', '2x hızlandır', '9:16 dikey yap' gibi akıllı komutlarla anında düzenleyin.
           </p>
           <button
             onclick={() => editor.isCommandPaletteOpen = true}
             class="w-full py-2 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition-all shadow-md cursor-pointer"
           >
-            <Sparkles size={13} /> Komut Paletini Aç (⌘K)
+            <Sparkles size={13} /> AI Komut Paletini Aç (⌘K)
           </button>
         </div>
 
@@ -648,10 +632,9 @@
             onclick={async () => {
               const res = await aiService.generateViralHooks();
               // automatically add as text clip
-              let textTrack = editor.tracks.find(t => t.name === 'Yazı' || t.name === 'T1' || t.name.startsWith('T'));
+              let textTrack = editor.tracks.find(t => t.type === 'subtitle' || t.name === 'Yazı' || t.name === 'T1' || t.name.startsWith('T'));
               if (!textTrack) {
-                editor.addTrack('T1');
-                textTrack = editor.tracks[editor.tracks.length - 1];
+                textTrack = editor.addTrack('T1', 'subtitle');
               }
               editor.addClip(textTrack.id, res.title, editor.playhead, 3.5, '#ec4899', undefined, { type: 'text' });
               editor.announce(`Viral başlık eklendi: "${res.title}"`);
@@ -665,195 +648,7 @@
       </div>
     </Tabs.Content>
 
-    <!-- 3. TAB CONTENT: INSPECTOR -->
-    <Tabs.Content value="inspector" class="flex-1 overflow-y-auto p-3.5 custom-scrollbar outline-none">
-      <div class="space-y-4">
-        {#if selectedClip}
-          <div class="space-y-4">
-            <div>
-              <span class="text-[10px] text-neutral-500 font-mono uppercase">Seçili Klip</span>
-              <h3 class="text-sm font-bold text-white truncate">{selectedClip.name}</h3>
-            </div>
-
-            <!-- Basic Clip Info -->
-            <div class="grid grid-cols-2 gap-2 p-2.5 bg-neutral-950/60 rounded-xl border border-neutral-800 text-xs font-mono">
-              <div>
-                <span class="text-[10px] text-neutral-500 block">Başlangıç</span>
-                <span class="text-white font-medium">{selectedClip.startAt.toFixed(2)}s</span>
-              </div>
-              <div>
-                <span class="text-[10px] text-neutral-500 block">Süre</span>
-                <span class="text-white font-medium">{selectedClip.duration.toFixed(2)}s</span>
-              </div>
-            </div>
-
-            <!-- Speed Controls -->
-            <div class="space-y-1.5">
-              <div class="flex items-center justify-between">
-                <span class="text-xs font-semibold text-neutral-300">Oynatma Hızı:</span>
-                <button
-                  onclick={() => editor.openBottomSheet('speed_curve')}
-                  class="flex items-center gap-1 text-[11px] text-amber-400 hover:text-amber-300 font-medium px-2 py-0.5 rounded bg-amber-500/10 border border-amber-500/20 transition-colors"
-                  title="Kavisli Hız Eğrisi Düzenleyici"
-                >
-                  <Gauge size={12} />
-                  <span>{selectedClip.speedCurve ? `Eğri (${selectedClip.speedCurve.preset})` : 'Hız Eğrisi'}</span>
-                </button>
-              </div>
-              <div class="grid grid-cols-5 gap-1 text-xs">
-                {#each [0.5, 0.75, 1.0, 1.5, 2.0] as spd}
-                  <button
-                    onclick={() => editor.setClipSpeed(selectedClip.id, spd)}
-                    class="py-1 rounded-md font-mono text-[11px] transition-colors {(selectedClip.speed ?? 1.0) === spd && !selectedClip.speedCurve ? 'bg-amber-600 text-white font-bold' : 'bg-neutral-950 hover:bg-neutral-800 text-neutral-300'}"
-                  >
-                    {spd}x
-                  </button>
-                {/each}
-              </div>
-            </div>
-
-            <!-- Volume Slider with bits-ui Slider -->
-            <div class="space-y-1.5">
-              <div class="flex justify-between items-center text-xs">
-                <span class="font-semibold text-neutral-300">Ses Seviyesi:</span>
-                <div class="flex items-center gap-2">
-                  <span class="font-mono text-neutral-400">{Math.round((selectedClip.volume ?? 1.0) * 100)}%</span>
-                  <button
-                    onclick={() => editor.openBottomSheet('audio_envelope')}
-                    class="flex items-center gap-1 text-[11px] text-emerald-400 hover:text-emerald-300 font-medium px-2 py-0.5 rounded bg-emerald-500/10 border border-emerald-500/20 transition-colors"
-                    title="Fade In/Out & Akıllı Ducking"
-                  >
-                    <Sliders size={12} />
-                    <span>Zarf / Ducking</span>
-                  </button>
-                </div>
-              </div>
-              <Slider.Root
-                type="single"
-                min={0}
-                max={2}
-                step={0.05}
-                value={selectedClip.volume ?? 1.0}
-                onValueChange={(val) => editor.setClipVolume(selectedClip.id, val)}
-                onValueCommit={(val) => editor.announce(`Ses seviyesi %${Math.round(val * 100)} olarak ayarlandı.`)}
-                class="relative flex w-full touch-none select-none items-center py-2 cursor-pointer"
-              >
-                {#snippet children({ thumbItems })}
-                  <span class="relative h-1.5 w-full grow overflow-hidden rounded-full bg-neutral-800">
-                    <Slider.Range class="absolute h-full bg-blue-500 rounded-full" />
-                  </span>
-                  {#each thumbItems as thumb (thumb.index)}
-                    <Slider.Thumb
-                      index={thumb.index}
-                      class="block size-4 rounded-full border border-blue-400 bg-white shadow transition-all focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-400 hover:scale-110 active:scale-95"
-                    />
-                  {/each}
-                {/snippet}
-              </Slider.Root>
-            </div>
-
-            <!-- Clip Contextual AI Actions -->
-            <div class="space-y-2 pt-2 border-t border-neutral-900">
-              <span class="text-xs font-semibold text-neutral-300">Bu Klibe Özel AI Eylemleri:</span>
-              <div class="space-y-1.5">
-                <button
-                  onclick={() => runWhisperCaptions()}
-                  class="w-full py-2 px-2.5 rounded-lg bg-neutral-950 hover:bg-neutral-800 text-purple-300 border border-purple-500/30 text-xs font-medium flex items-center gap-2 transition-colors"
-                >
-                  <Type size={13} /> Bu Klibe Altyazı Çıkar
-                </button>
-                <button
-                  onclick={() => runSilenceCut()}
-                  class="w-full py-2 px-2.5 rounded-lg bg-neutral-950 hover:bg-neutral-800 text-emerald-300 border border-emerald-500/30 text-xs font-medium flex items-center gap-2 transition-colors"
-                >
-                  <Scissors size={13} /> Bu Klipteki Sessizlikleri Kes
-                </button>
-              </div>
-            </div>
-
-            <!-- Clip Danger Zone Actions -->
-            <div class="flex gap-2 pt-2">
-              <button
-                onclick={() => editor.duplicateClip(selectedClip.id)}
-                class="flex-1 py-1.5 rounded-lg bg-neutral-950 hover:bg-neutral-800 text-neutral-300 text-xs font-medium transition-colors"
-              >
-                Kopyala
-              </button>
-              <button
-                onclick={() => editor.deleteClip(selectedClip.id)}
-                class="py-1.5 px-3 rounded-lg bg-red-950/40 hover:bg-red-900/50 text-red-400 border border-red-800/40 text-xs font-medium transition-colors flex items-center gap-1"
-              >
-                <Trash2 size={13} /> Sil
-              </button>
-            </div>
-          </div>
-        {:else}
-          <!-- Project Global Settings -->
-          <div class="space-y-4">
-            <div>
-              <span class="text-[10px] text-neutral-500 font-mono uppercase">Genel Ayarlar</span>
-              <h3 class="text-sm font-bold text-white">Proje Özellikleri</h3>
-              <p class="text-xs text-neutral-400">Timeline'da bir klip seçtiğinizde klibin özelliklerini buradan ayarlayabilirsiniz.</p>
-            </div>
-
-            <!-- Aspect Ratio Selector -->
-            <div class="space-y-2">
-              <span class="text-xs font-semibold text-neutral-300">En/Boy Oranı (Canvas Aspect Ratio):</span>
-              <div class="grid grid-cols-2 gap-2">
-                <button
-                  onclick={() => editor.aspectRatio = 'original'}
-                  class="p-2.5 rounded-xl border text-center transition-all cursor-pointer {editor.aspectRatio === 'original' ? 'bg-blue-950/60 border-blue-500 text-white font-bold' : 'bg-neutral-950 border-neutral-800 text-neutral-400 hover:text-white'}"
-                >
-                  <span class="text-xs block font-bold">Orijinal</span>
-                  <span class="text-[10px] text-neutral-500 block">Videonun Kendi Boyutu</span>
-                </button>
-
-                <button
-                  onclick={() => editor.aspectRatio = '16:9'}
-                  class="p-2.5 rounded-xl border text-center transition-all cursor-pointer {editor.aspectRatio === '16:9' ? 'bg-blue-950/60 border-blue-500 text-white font-bold' : 'bg-neutral-950 border-neutral-800 text-neutral-400 hover:text-white'}"
-                >
-                  <span class="text-xs block font-bold">16:9</span>
-                  <span class="text-[10px] text-neutral-500 block">YouTube / TV</span>
-                </button>
-
-                <button
-                  onclick={() => editor.aspectRatio = '9:16'}
-                  class="p-2.5 rounded-xl border text-center transition-all cursor-pointer {editor.aspectRatio === '9:16' ? 'bg-blue-950/60 border-blue-500 text-white font-bold' : 'bg-neutral-950 border-neutral-800 text-neutral-400 hover:text-white'}"
-                >
-                  <span class="text-xs block font-bold">9:16</span>
-                  <span class="text-[10px] text-neutral-500 block">TikTok / Shorts</span>
-                </button>
-
-                <button
-                  onclick={() => editor.aspectRatio = '1:1'}
-                  class="p-2.5 rounded-xl border text-center transition-all cursor-pointer {editor.aspectRatio === '1:1' ? 'bg-blue-950/60 border-blue-500 text-white font-bold' : 'bg-neutral-950 border-neutral-800 text-neutral-400 hover:text-white'}"
-                >
-                  <span class="text-xs block font-bold">1:1</span>
-                  <span class="text-[10px] text-neutral-500 block">Kare / Post</span>
-                </button>
-              </div>
-            </div>
-
-            <div class="p-3 bg-neutral-950/50 rounded-xl border border-neutral-800 text-xs space-y-1.5">
-              <div class="flex justify-between">
-                <span class="text-neutral-400">Toplam Süre:</span>
-                <span class="font-mono text-white">{editor.duration.toFixed(0)} saniye</span>
-              </div>
-              <div class="flex justify-between">
-                <span class="text-neutral-400">Kanal Sayısı:</span>
-                <span class="font-mono text-white">{editor.tracks.length} kanal</span>
-              </div>
-              <div class="flex justify-between">
-                <span class="text-neutral-400">Kare Hızı:</span>
-                <span class="font-mono text-white">60 FPS (WebCodecs)</span>
-              </div>
-            </div>
-          </div>
-        {/if}
-      </div>
-    </Tabs.Content>
-
-    <!-- 4. TAB CONTENT: CAPTIONS MANAGER -->
+    <!-- 3. TAB CONTENT: CAPTIONS MANAGER -->
     <Tabs.Content value="captions" class="flex-1 overflow-y-auto p-3.5 custom-scrollbar outline-none">
       <div class="space-y-4">
         <div class="flex items-center justify-between">

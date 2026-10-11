@@ -10,7 +10,6 @@
   import { aiService } from './lib/engine/aiService.svelte';
   import { appState } from './lib/appState.svelte';
   import StudioSidebar from './lib/components/StudioSidebar.svelte';
-  import Inspector from './lib/components/Inspector.svelte';
   import BottomSheet from './lib/components/BottomSheet.svelte';
   import Timeline from './lib/components/Timeline.svelte';
   import BottomBar from './lib/components/BottomBar.svelte';
@@ -28,12 +27,36 @@
     SkipBack, SkipForward, Image as ImageIcon, Scissors, 
     Trash as Trash2, X, Undo2, Redo2, FastForward, Volume2, Layers, Crop, FolderClosed,
     SlidersHorizontal as Sliders, Monitor, CircleQuestionMark as HelpCircle, RefreshCw,
-    Maximize2, Minimize2, Type, Zap, Cpu, RotateCcw, Magnet
+    Maximize2, Minimize2, Type, Zap, Cpu, RotateCcw, Magnet, ZoomIn, ZoomOut, Music,
+    ChevronDown, ChevronUp, ChevronLeft, ChevronRight
   } from '@lucide/svelte';
 
   let canvasRef = $state<HTMLCanvasElement | undefined>();
-  let isExportOpen = $state(false);
-  let isInspectorOpen = $state(true);
+
+  let timelineHeightClass = $derived.by(() => {
+    if (editor.isTimelineCollapsed) {
+      return 'h-0 min-h-0 border-t-0 lg:border-none opacity-0';
+    }
+    if (editor.mobileWorkspace === 'filters') {
+      return editor.isBottomPanelExpanded
+        ? 'h-[48vh] lg:h-[42vh] min-h-[310px] opacity-100 flex flex-col'
+        : 'h-[32vh] lg:h-[28vh] min-h-[190px] opacity-100 flex flex-col';
+    }
+    const count = editor.tracks.length;
+    if (count === 0) {
+      return 'h-[125px] min-h-[125px] opacity-100 flex flex-col';
+    }
+    if (count === 1) {
+      return 'h-[140px] min-h-[140px] opacity-100 flex flex-col';
+    }
+    if (count === 2) {
+      return 'h-[185px] min-h-[185px] opacity-100 flex flex-col';
+    }
+    if (count === 3) {
+      return 'h-[235px] min-h-[235px] opacity-100 flex flex-col';
+    }
+    return 'h-[280px] lg:h-[30vh] min-h-[240px] max-h-[35vh] opacity-100 flex flex-col';
+  });
 
   let selectedClip = $derived(editor.getSelectedClip());
 
@@ -262,17 +285,6 @@
       return;
     }
   }
-
-  $effect(() => {
-    if (editor.selectedClipId) {
-      if (typeof window !== 'undefined' && window.innerWidth >= 1024) {
-        untrack(() => {
-          appState.isInspectorOpen = true;
-          editor.activeSidebarTab = 'inspector';
-        });
-      }
-    }
-  });
 
   $effect(() => {
     // Evict deleted assets from timelineFileCache to free RAM
@@ -635,17 +647,9 @@
         <div class="w-px h-4 bg-white/10 mx-0.5"></div>
 
         <button 
-          onclick={() => { editor.activeSidebarTab = 'inspector'; appState.isInspectorOpen = true; }}
-          class="px-2.5 py-1.5 rounded-lg text-xs transition-all flex items-center gap-1.5 {editor.activeSidebarTab === 'inspector' && appState.isInspectorOpen ? 'bg-white/15 text-white font-semibold' : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5'}"
-          title="Klip ve Proje Müfettişi"
-        >
-          <Sliders size={13} />
-          <span>Müfettiş</span>
-        </button>
-        <button 
           onclick={() => { appState.isInspectorOpen = !appState.isInspectorOpen; }}
           class="p-1.5 rounded-lg text-xs transition-colors flex items-center text-neutral-400 hover:text-white hover:bg-white/10"
-          title={appState.isInspectorOpen ? "Sağ Paneli Kapat" : "Sağ Paneli Aç"}
+          title={appState.isInspectorOpen ? "Yan Paneli Kapat" : "Yan Paneli Aç"}
         >
           <X size={13} class={appState.isInspectorOpen ? '' : 'rotate-45'} />
         </button>
@@ -663,7 +667,7 @@
 
       <!-- Neon 4K Export Button -->
       <button 
-        onclick={() => isExportOpen = true}
+        onclick={() => editor.isExportOpen = true}
         class="neon-btn-export text-white px-3.5 sm:px-4 py-2 rounded-xl text-xs font-semibold flex items-center gap-2 cursor-pointer shadow-lg"
       >
         <Download size={14} />
@@ -871,8 +875,8 @@
       <!-- Right Panel: Unified Contextual Workspace (Desktop) -->
       {#if appState.isInspectorOpen}
         <div class="hidden lg:flex w-[350px] flex-col flex-none spatial-glass lg:rounded-2xl overflow-hidden shadow-2xl border border-white/10">
-          {#if editor.activeSidebarTab === 'inspector'}
-            <Inspector />
+          {#if editor.activeSidebarTab === 'filters'}
+            <FiltersSheet isBottomDocked={false} />
           {:else}
             <StudioSidebar isMobileSheet={false} hideTabs={true} />
           {/if}
@@ -883,7 +887,7 @@
 
     <!-- Minimized Transport Control Bar (Pinned Directly Above Timeline) -->
     <div class="flex-none px-3 sm:px-4 py-1.5 flex items-center justify-between spatial-glass lg:rounded-xl border-t lg:border border-white/10 z-20 transition-all select-none shadow-lg">
-      <!-- Left: Razor Cut & Magnet Snapping -->
+      <!-- Left: Razor Cut & Magnet Snapping & Beat Snapping -->
       <div class="flex items-center gap-1.5">
         <button
           onclick={() => { editor.splitClipAtPlayhead(); editor.triggerHaptic('medium'); }}
@@ -903,6 +907,17 @@
           title={editor.isMagnetic ? "Manyetik Yapışma Açık" : "Manyetik Yapışma Kapalı"}
         >
           <Magnet size={13} />
+        </button>
+
+        <button
+          onclick={() => {
+            editor.snapToBeat = !editor.snapToBeat;
+            editor.triggerHaptic('light');
+          }}
+          class="p-1.5 rounded-lg transition-colors cursor-pointer {editor.snapToBeat ? 'text-pink-400 bg-pink-500/15 border border-pink-500/25' : 'text-neutral-500 hover:text-neutral-300'}"
+          title={editor.snapToBeat ? "Ritmik Vuruşlara Yapışma Açık" : "Ritmik Vuruşlara Yapışma Kapalı"}
+        >
+          <Music size={13} />
         </button>
       </div>
 
@@ -937,8 +952,26 @@
         </button>
       </div>
 
-      <!-- Right: Playhead Timecode & Focus Mode Toggle -->
+      <!-- Right: Playhead Timecode, Zoom Controls & Focus Mode Toggle -->
       <div class="flex items-center gap-1.5">
+        <div class="hidden sm:flex items-center gap-1 px-1.5 py-0.5 rounded-lg bg-white/5 border border-white/10 text-neutral-400">
+          <button 
+            onclick={() => editor.zoom = Math.max(10, Math.round(editor.zoom * 0.8))}
+            class="p-1 hover:text-white rounded transition-colors cursor-pointer"
+            title="Uzaklaş"
+          >
+            <ZoomOut size={12} />
+          </button>
+          <span class="text-[10px] font-mono min-w-[28px] text-center select-none text-neutral-300">{Math.round(editor.zoom)}x</span>
+          <button 
+            onclick={() => editor.zoom = Math.min(200, Math.round(editor.zoom * 1.25))}
+            class="p-1 hover:text-white rounded transition-colors cursor-pointer"
+            title="Yakınlaş"
+          >
+            <ZoomIn size={12} />
+          </button>
+        </div>
+
         <div class="px-2 py-0.5 rounded-lg bg-white/5 border border-white/10 font-mono text-[11px] text-neutral-300 shadow-inner flex items-center gap-1.5">
           <span class="w-1.5 h-1.5 rounded-full {editor.isPlaying ? 'bg-rose-500 animate-ping' : 'bg-emerald-400'}"></span>
           <span>{formatTimecode(editor.playhead)}</span>
@@ -949,10 +982,16 @@
             editor.isTimelineCollapsed = !editor.isTimelineCollapsed;
             editor.triggerHaptic('light');
           }}
-          class="p-1.5 rounded-lg hover:bg-white/10 text-neutral-400 hover:text-white transition-all text-xs cursor-pointer"
-          title={editor.isTimelineCollapsed ? "Zaman Çizelgesini Genişlet" : "Odak Önizleme Modu (Zaman Çizelgesini Gizle)"}
+          class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg hover:bg-white/10 text-neutral-400 hover:text-white transition-all text-xs cursor-pointer {editor.isTimelineCollapsed ? 'bg-purple-500/15 border border-purple-500/30 text-purple-300' : 'bg-white/5 border border-white/10'}"
+          title={editor.isTimelineCollapsed ? "Alt Paneli / Zaman Çizelgesini Genişlet" : "Alt Paneli / Zaman Çizelgesini Gizle (Odak Önizleme Modu)"}
         >
-          <Layers size={14} class={editor.isTimelineCollapsed ? 'text-purple-400' : ''} />
+          {#if editor.isTimelineCollapsed}
+            <ChevronUp size={14} class="text-purple-400" />
+            <span class="text-[10px] font-semibold text-purple-300">Paneli Aç</span>
+          {:else}
+            <ChevronDown size={14} class="text-neutral-400" />
+            <span class="text-[10px] font-semibold text-neutral-300">Paneli Gizle</span>
+          {/if}
         </button>
       </div>
     </div>
@@ -961,18 +1000,18 @@
     <section 
       aria-label="Zaman Çizelgesi" 
       id="timeline-section" 
-      class="transition-all duration-300 ease-in-out flex-none spatial-glass lg:rounded-2xl border-t lg:border border-white/10 relative z-10 overflow-hidden shadow-2xl {editor.isTimelineCollapsed ? 'h-0 min-h-0 border-t-0 lg:border-none opacity-0' : 'h-[36vh] lg:h-[34vh] min-h-[140px] lg:min-h-[190px] opacity-100 flex flex-col'}"
+      class="transition-all duration-300 ease-in-out flex-none spatial-glass lg:rounded-2xl border-t lg:border border-white/10 relative z-10 overflow-hidden shadow-2xl {timelineHeightClass}"
     >
       {#if editor.mobileWorkspace === 'timeline'}
         <Timeline />
+      {:else if editor.mobileWorkspace === 'filters'}
+        <div class="flex-1 overflow-hidden flex flex-col h-full w-full">
+          <FiltersSheet isBottomDocked={true} onClose={() => { editor.mobileWorkspace = 'timeline'; }} />
+        </div>
       {:else}
         <!-- Mobile workspace panel swapping logic (hidden on lg, takes timeline spot) -->
         <div class="flex-1 lg:hidden spatial-glass overflow-hidden flex flex-col h-full w-full">
-          {#if editor.mobileWorkspace === 'inspector'}
-            <Inspector />
-          {:else}
-            <StudioSidebar isMobileSheet={false} hideTabs={true} />
-          {/if}
+          <StudioSidebar isMobileSheet={false} hideTabs={true} />
         </div>
         <!-- On desktop, if timeline is "swapped", show timeline -->
         <div class="hidden lg:flex flex-1 w-full h-full">
@@ -998,15 +1037,13 @@
     {:else if editor.activeBottomSheet === 'audio_envelope'}
       <AudioEnvelopeSheet />
     {:else if editor.activeBottomSheet === 'filters'}
-      <FiltersSheet />
-    {:else if editor.activeBottomSheet === 'inspector'}
-      <Inspector />
+      <FiltersSheet onClose={() => editor.closeBottomSheet()} />
     {:else if editor.activeBottomSheet}
       <StudioSidebar isMobileSheet={true} onClose={() => editor.closeBottomSheet()} />
     {/if}
   </BottomSheet>
 
-  <ExportModal bind:isOpen={isExportOpen} />
+  <ExportModal bind:isOpen={editor.isExportOpen} />
   <!-- Studio Settings Modal -->
   <SettingsModal />
   <!-- AI Control Center & Model Hub Modal -->

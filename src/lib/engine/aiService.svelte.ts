@@ -365,10 +365,9 @@ export class AIService {
       );
 
       // Find or create 'Altyazılar' track
-      let subTrack = editor.tracks.find(t => t.name === 'Altyazılar' || t.name === 'T1');
+      let subTrack = editor.tracks.find(t => t.type === 'subtitle' || t.name === 'Altyazılar' || t.name === 'T1' || t.name.startsWith('T'));
       if (!subTrack) {
-        editor.addTrack('Altyazılar');
-        subTrack = editor.tracks[editor.tracks.length - 1];
+        subTrack = editor.addTrack('T1', 'subtitle');
       }
 
       // Generate timed subtitle clips
@@ -495,13 +494,28 @@ export class AIService {
               sourceOffset: Number((originalSourceOffset + seg.start).toFixed(3)),
               sourceUrl: originalSourceUrl,
               type: originalType,
-              cropRect: originalCropRect,
+              cropRect: originalCropRect ? { ...originalCropRect } : undefined,
               isBgRemoved: originalIsBgRemoved,
-              volume: originalVolume
+              volume: originalVolume,
+              colorGrading: targetClip.colorGrading ? { ...targetClip.colorGrading } : undefined,
+              speed: targetClip.speed,
+              speedCurve: targetClip.speedCurve ? JSON.parse(JSON.stringify(targetClip.speedCurve)) : undefined,
+              audioEnvelope: targetClip.audioEnvelope ? { ...targetClip.audioEnvelope } : undefined,
+              reframeKeyframes: targetClip.reframeKeyframes ? [...targetClip.reframeKeyframes] : undefined
             }
           );
 
           runningTimelinePos += segDuration;
+        }
+
+        // Ripple shift following clips if magnetic editing is active
+        const totalShortened = Number(((originalStart + targetClip.duration) - runningTimelinePos).toFixed(3));
+        if (editor.isMagnetic && totalShortened > 0.05) {
+          for (const clip of targetTrack.clips) {
+            if (clip.startAt > originalStart + targetClip.duration - 0.05) {
+              clip.startAt = Math.max(0, Number((clip.startAt - totalShortened).toFixed(3)));
+            }
+          }
         }
 
         editor.saveState();

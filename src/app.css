@@ -74,20 +74,51 @@
   }
 }
 
-/* Custom minimal scrollbar */
-.custom-scrollbar::-webkit-scrollbar {
-  width: 4px;
-  height: 4px;
+/* Mobile & Touch Devices: Completely eliminate scrollbars for clean native app ergonomics */
+@media (max-width: 1024px), (pointer: coarse) {
+  * {
+    scrollbar-width: none !important;
+    -ms-overflow-style: none !important;
+  }
+  *::-webkit-scrollbar {
+    display: none !important;
+    width: 0 !important;
+    height: 0 !important;
+  }
 }
-.custom-scrollbar::-webkit-scrollbar-track {
-  background: transparent;
+
+/* Desktop: Minimal 4px spatial glass scrollbar */
+@media (hover: hover) and (pointer: fine) {
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 4px;
+    height: 4px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.12);
+    border-radius: 9999px;
+    transition: background 0.2s ease;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.28);
+  }
 }
-.custom-scrollbar::-webkit-scrollbar-thumb {
-  background: #334155;
-  border-radius: 9999px;
+
+/* Utility to explicitly hide scrollbars on horizontal carousels / strips */
+.no-scrollbar {
+  scrollbar-width: none !important;
+  -ms-overflow-style: none !important;
 }
-.custom-scrollbar::-webkit-scrollbar-thumb:hover {
-  background: #475569;
+.no-scrollbar::-webkit-scrollbar {
+  display: none !important;
+  width: 0 !important;
+  height: 0 !important;
 }
 
 /* 2026 Spatial Glass Design System */

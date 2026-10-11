@@ -16,13 +16,42 @@ export class AgenticEditor {
   parseIntent(prompt: string): AgentIntentResult {
     const p = prompt.trim().toLowerCase();
 
-    // 1. Sessizlik temizleme / Jump Cut
+    // 0. Ses Kapatma (Mute) & Ses Seviyesi (Volume) - Checked FIRST to avoid conflict with silence cut
     if (
-      p.includes('sessiz') ||
+      p.includes('sessize al') ||
+      p.includes('sesini kapat') ||
+      p.includes('sesi kapat') ||
+      p.includes('mute') ||
+      p.includes('sesi kes')
+    ) {
+      return {
+        action: 'TOGGLE_MUTE',
+        confidence: 0.98,
+        description: 'Videonun sesini kapat / sessize al'
+      };
+    }
+
+    const volumeMatch = p.match(/(?:ses|volume|sesi)\s*(?:seviyesi|düzeyi)?\s*(?:%|yüzde)?\s*(\d+)/i) || p.match(/(\d+)\s*%\s*ses/i);
+    if (volumeMatch && (p.includes('ses') || p.includes('volume'))) {
+      const volPercent = parseInt(volumeMatch[1], 10);
+      const vol = Math.max(0, Math.min(2, volPercent / 100));
+      return {
+        action: 'SET_VOLUME',
+        confidence: 0.95,
+        description: `Ses seviyesini %${volPercent} olarak ayarla`,
+        params: { volume: vol }
+      };
+    }
+
+    // 1. Sessizlik temizleme / Jump Cut (Safe check ensuring no "sessize al" false trigger)
+    if (
+      p.includes('sessizlik') ||
       p.includes('jump cut') ||
       p.includes('silence') ||
       p.includes('duraklama') ||
-      p.includes('boşlukları sil')
+      p.includes('boşlukları sil') ||
+      p.includes('ölü anlar') ||
+      (p.includes('sessiz') && !p.includes('sessize'))
     ) {
       return {
         action: 'JUMP_CUT_SILENCE',
@@ -140,8 +169,27 @@ export class AgenticEditor {
       };
     }
 
-    // 9. Silme (Delete selected)
-    if (p.includes('sil') || p.includes('kaldır') || p.includes('delete') || p.includes('çöpe')) {
+    // 9. Çoğaltma / Duplicate
+    if (p.includes('çoğalt') || p.includes('kopyasını çıkar') || p.includes('duplicate')) {
+      return {
+        action: 'DUPLICATE_CLIP',
+        confidence: 0.95,
+        description: 'Seçili klibin kopyasını oluşturup zaman çizelgesine ekle'
+      };
+    }
+
+    // 10. Silme (Delete selected clip)
+    if (
+      p === 'sil' ||
+      p === 'kaldır' ||
+      p.includes('klibi sil') ||
+      p.includes('klibi kaldır') ||
+      p.includes('seçiliyi sil') ||
+      p.includes('seçili klibi') ||
+      p.includes('videoyu sil') ||
+      p.includes('delete clip') ||
+      p.includes('çöpe at')
+    ) {
       return {
         action: 'DELETE_SELECTED',
         confidence: 0.85,
@@ -149,7 +197,7 @@ export class AgenticEditor {
       };
     }
 
-    // 10. Yapay Zeka Seslendirme / Kokoro TTS
+    // 11. Yapay Zeka Seslendirme / Kokoro TTS
     if (
       p.includes('seslendir') ||
       p.includes('ses üret') ||
@@ -173,7 +221,7 @@ export class AgenticEditor {
       };
     }
 
-    // 11. Metin / Başlık Katmanı Ekleme
+    // 12. Metin / Başlık Katmanı Ekleme
     if (
       p.includes('yazı ekle') ||
       p.includes('metin ekle') ||
@@ -197,7 +245,7 @@ export class AgenticEditor {
       };
     }
 
-    // 12. Geri Al / Yinele
+    // 13. Geri Al / Yinele
     if (p.includes('geri al') || p.includes('undo')) {
       return {
         action: 'UNDO',
@@ -213,7 +261,25 @@ export class AgenticEditor {
       };
     }
 
-    // 13. Tek Tıkla Renk İyileştirme / Auto Color
+    // 14. Renkleri Tümüne Yay / Kopyala
+    if (p.includes('tümüne yay') || p.includes('tüm kliplere yay') || p.includes('bütün kliplere uygula') || p.includes('renkleri tümüne')) {
+      return {
+        action: 'COPY_GRADE_TO_ALL',
+        confidence: 0.95,
+        description: 'Seçili klibin renk ve LUT ayarını projedeki tüm video parçalarına kopyala'
+      };
+    }
+
+    // 15. Renkleri Sıfırla
+    if (p.includes('renkleri sıfırla') || p.includes('renk sıfırla') || p.includes('filtreyi kaldır') || p.includes('orijinal renge dön')) {
+      return {
+        action: 'RESET_COLOR_GRADING',
+        confidence: 0.95,
+        description: 'Renk ve filtre ayarlarını sıfırlayıp doğal haline döndür'
+      };
+    }
+
+    // 16. Tek Tıkla Renk İyileştirme / Auto Color
     if (
       p.includes('otomatik renk') ||
       p.includes('renkleri düzelt') ||
@@ -228,7 +294,7 @@ export class AgenticEditor {
       };
     }
 
-    // 14. Renk Filtresi Uygulama
+    // 17. Renk Filtresi Uygulama
     if (
       p.includes('filtre') ||
       p.includes('lut') ||
@@ -257,7 +323,7 @@ export class AgenticEditor {
       };
     }
 
-    // 15. Dip Gürültü Temizleme / Denoise
+    // 18. Dip Gürültü Temizleme / Denoise
     if (
       p.includes('gürültü') ||
       p.includes('sesi temizle') ||
@@ -273,7 +339,7 @@ export class AgenticEditor {
       };
     }
 
-    // 16. Viral Kanca & Senaryo Üretimi
+    // 19. Viral Kanca & Senaryo Üretimi
     if (
       p.includes('viral') ||
       p.includes('kanca') ||
@@ -289,7 +355,16 @@ export class AgenticEditor {
       };
     }
 
-    // 17. En/Boy Oranı Değiştirme
+    // 20. Geçiş Efektleri
+    if (p.includes('geçiş ekle') || p.includes('geçiş efekti') || p.includes('geçiş koy') || p.includes('crossfade') || p.includes('transition')) {
+      return {
+        action: 'OPEN_TRANSITIONS',
+        confidence: 0.95,
+        description: 'Geçiş efektleri seçicisini aç'
+      };
+    }
+
+    // 21. En/Boy Oranı Değiştirme
     if (p.includes('9:16') || p.includes('dikey') || p.includes('shorts yap') || p.includes('tiktok yap')) {
       return {
         action: 'SET_ASPECT_RATIO',
@@ -315,7 +390,25 @@ export class AgenticEditor {
       };
     }
 
-    // 18. AI Kontrol Merkezi & Modeller
+    // 22. Dışa Aktarma / Export
+    if (p.includes('dışa aktar') || p.includes('export') || p.includes('render al') || p.includes('videoyu indir') || p.includes('kaydet')) {
+      return {
+        action: 'OPEN_EXPORT',
+        confidence: 0.96,
+        description: '4K Ultra-HD Dışa Aktarma penceresini aç'
+      };
+    }
+
+    // 23. Proje Temizleme / Sıfırlama
+    if (p.includes('projeyi sıfırla') || p.includes('yeni proje') || p.includes('her şeyi temizle') || p.includes('baştan başla') || p.includes('reset project')) {
+      return {
+        action: 'RESET_PROJECT',
+        confidence: 0.96,
+        description: 'Zaman çizelgesini temizle ve yeni bir boş proje başlat'
+      };
+    }
+
+    // 24. AI Kontrol Merkezi & Modeller
     if (
       p.includes('ai merkezi') ||
       p.includes('kontrol merkezi') ||
@@ -329,11 +422,11 @@ export class AgenticEditor {
       };
     }
 
-    // Fallback: Default to auto captions if audio/text mentioned, else jump-cut
+    // Fallback: Safe unrecognized prompt notice (never destructively cut up video)
     return {
-      action: 'JUMP_CUT_SILENCE',
-      confidence: 0.5,
-      description: `"${prompt}" komutu için akıllı düzenleme planlandı.`
+      action: 'UNKNOWN_INTENT',
+      confidence: 0.1,
+      description: `"${prompt}" komutu anlaşılamadı. Lütfen önerilen akıllı eylemleri deneyin.`
     };
   }
 
@@ -397,8 +490,17 @@ export class AgenticEditor {
       APPLY_TEMPLATE: 'Autonomous Rhythm Orchestrator',
       SET_ASPECT_RATIO: 'Viewport Geometry Engine',
       OPEN_AI_CENTER: 'AI Orchestration Core',
+      SET_VOLUME: 'Web Audio DSP Gain Controller',
+      TOGGLE_MUTE: 'Web Audio DSP Mute Stage',
+      DUPLICATE_CLIP: 'Magnetic Timeline Engine',
+      COPY_GRADE_TO_ALL: 'Oklab Color Science Engine',
+      RESET_COLOR_GRADING: 'Oklab Color Science Engine',
+      OPEN_TRANSITIONS: 'Spatial Transition Engine',
+      OPEN_EXPORT: 'Hardware Accelerated MediaCodec Pipeline',
+      RESET_PROJECT: 'Studio State Orchestrator',
       UNDO: 'Timeline History Engine',
-      REDO: 'Timeline History Engine'
+      REDO: 'Timeline History Engine',
+      UNKNOWN_INTENT: 'AI Command Engine'
     };
 
     const activeModel = modelMap[intent.action] || 'Agentic Orchestration Core';
@@ -420,6 +522,14 @@ export class AgenticEditor {
       let result: { success: boolean; message: string };
 
       switch (intent.action) {
+        case 'UNKNOWN_INTENT': {
+          result = {
+            success: false,
+            message: `Komut anlaşılamadı. Örn: "Sessizlikleri sil", "Altyazı üret", "2x hızlandır", "9:16 dikey yap"`
+          };
+          break;
+        }
+
         case 'UNDO':
           editor.undo();
           result = { success: true, message: 'İşlem geri alındı.' };
@@ -611,6 +721,100 @@ export class AgenticEditor {
           } else {
             result = { success: false, message: 'Şablon için ses dosyası bulunamadı.' };
           }
+          break;
+        }
+
+        case 'TOGGLE_MUTE': {
+          const clip = editor.getSelectedClip() || editor.tracks.flatMap(t => t.clips).find(c => c.type === 'video' || c.type === 'audio');
+          if (clip) {
+            const newVol = (clip.volume ?? 1) > 0 ? 0 : 1;
+            editor.setClipVolume(clip.id, newVol);
+            result = { success: true, message: newVol === 0 ? 'Klip sesi kapatıldı (Mute).' : 'Klip sesi açıldı.' };
+          } else {
+            result = { success: false, message: 'Sesi kapatılacak klip bulunamadı.' };
+          }
+          break;
+        }
+
+        case 'SET_VOLUME': {
+          const clip = editor.getSelectedClip() || editor.tracks.flatMap(t => t.clips).find(c => c.type === 'video' || c.type === 'audio');
+          const vol = intent.params?.volume ?? 1;
+          if (clip) {
+            editor.setClipVolume(clip.id, vol);
+            result = { success: true, message: `Ses seviyesi %${Math.round(vol * 100)} olarak ayarlandı.` };
+          } else {
+            result = { success: false, message: 'Ses seviyesi ayarlanacak klip bulunamadı.' };
+          }
+          break;
+        }
+
+        case 'DUPLICATE_CLIP': {
+          editor.duplicateClip();
+          result = { success: true, message: 'Klip başarıyla çoğaltıldı.' };
+          break;
+        }
+
+        case 'COPY_GRADE_TO_ALL': {
+          const clip = editor.getSelectedClip();
+          if (clip && clip.colorGrading) {
+            const grading = { ...clip.colorGrading };
+            for (const track of editor.tracks) {
+              for (const c of track.clips) {
+                if (c.type !== 'audio' && c.type !== 'text') {
+                  c.colorGrading = { ...grading };
+                }
+              }
+            }
+            editor.saveState();
+            result = { success: true, message: 'Renk ve filtre ayarları projedeki tüm video parçalarına kopyalandı.' };
+          } else {
+            result = { success: false, message: 'Renk ayarları kopyalanacak bir klip seçilmedi.' };
+          }
+          break;
+        }
+
+        case 'RESET_COLOR_GRADING': {
+          const clip = editor.getSelectedClip();
+          if (clip) {
+            editor.updateClip(clip.id, {
+              colorGrading: { brightness: 0, contrast: 1, saturation: 1, temperature: 0, tint: 0 }
+            });
+            result = { success: true, message: 'Seçili klibin renk ayarları sıfırlandı.' };
+          } else {
+            for (const track of editor.tracks) {
+              for (const c of track.clips) {
+                if (c.type !== 'audio' && c.type !== 'text') {
+                  c.colorGrading = { brightness: 0, contrast: 1, saturation: 1, temperature: 0, tint: 0 };
+                }
+              }
+            }
+            editor.saveState();
+            result = { success: true, message: 'Tüm kliplerin renk ayarları sıfırlandı.' };
+          }
+          break;
+        }
+
+        case 'OPEN_TRANSITIONS': {
+          editor.openBottomSheet('transitions');
+          result = { success: true, message: 'Geçiş efektleri seçicisi açıldı.' };
+          break;
+        }
+
+        case 'OPEN_EXPORT': {
+          editor.isExportOpen = true;
+          result = { success: true, message: 'Dışa Aktarma (4K Ultra-HD) penceresi açıldı.' };
+          break;
+        }
+
+        case 'RESET_PROJECT': {
+          for (const track of editor.tracks) {
+            track.clips = [];
+          }
+          editor.playhead = 0;
+          editor.duration = 10;
+          editor.selectedClipId = null;
+          editor.saveState();
+          result = { success: true, message: 'Proje temizlendi ve yeni boş proje başlatıldı.' };
           break;
         }
 

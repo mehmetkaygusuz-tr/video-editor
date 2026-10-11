@@ -5,11 +5,12 @@
   import { masterAudioClock } from '../engine/audioClock';
   import Waveform from './Waveform.svelte';
   import TimelineStage from './TimelineStage.svelte';
-  import type { TimelineClip, SeekOptions } from '../types';
+  import type { TimelineClip, TimelineTrack, SeekOptions } from '../types';
   import { quantizeToFrame } from '../engine/timeline/timecode';
   import { 
     ZoomIn, ZoomOut, Sparkles, Volume2, VolumeX, Lock, LockOpen as Unlock,
-    Magnet, Music, Scissors, Trash2, Plus, Shuffle, Gauge, Sliders
+    Magnet, Music, Scissors, Trash2, Plus, Shuffle, Gauge, Sliders, X,
+    Film, Type, FolderClosed, Wand2
   } from '@lucide/svelte';
   
   const TRACK_HEIGHT = 56;
@@ -33,7 +34,7 @@
   const viewportStart = $derived(editor.scrollX / editor.zoom);
   const viewportEnd = $derived((editor.scrollX + containerWidth) / editor.zoom);
 
-  // Dynamically calculate the timeline duration based on clips + buffer (CapCut & Premiere style)
+  // Strict media end: Timeline duration strictly matches the end of media clips
   const maxClipEndTime = $derived.by(() => {
     let max = 0;
     for (const track of editor.tracks) {
@@ -46,9 +47,10 @@
   });
 
   const dynamicTimelineDuration = $derived.by(() => {
-    // If empty timeline, 10 seconds default; if has content, content + 4s buffer; extends if playhead moves further
-    const minBuffer = maxClipEndTime > 0 ? maxClipEndTime + 4 : 10;
-    return Math.max(minBuffer, editor.playhead + 2);
+    if (maxClipEndTime > 0) {
+      return Number(maxClipEndTime.toFixed(2));
+    }
+    return 10;
   });
 
   $effect(() => {
@@ -178,10 +180,10 @@
     e.stopPropagation(); // Prevent panning
     editor.selectClip(clip.id);
     
-    // Double tap detection on clip to quick-open bottom sheet inspector
+    // Double tap detection on clip to quick-open bottom docked filters
     const now = performance.now();
     if (lastClipTapId === clip.id && (now - lastClipTapTime) < 300) {
-      editor.openBottomSheet('inspector');
+      editor.mobileWorkspace = 'filters';
       editor.triggerHaptic('medium');
       lastClipTapId = '';
       lastClipTapTime = 0;
@@ -814,6 +816,67 @@
     }
   }
 
+  let showAddTrackModal = $state(false);
+
+  function addNewTrack(type: 'video' | 'subtitle' | 'effect' | 'audio') {
+    const counts = {
+      video: editor.tracks.filter(t => t.type === 'video' || t.name.startsWith('V')).length + 1,
+      subtitle: editor.tracks.filter(t => t.type === 'subtitle' || t.name.startsWith('T') || t.name.includes('Altyazı')).length + 1,
+      effect: editor.tracks.filter(t => t.type === 'effect' || t.name.startsWith('FX') || t.name.includes('Efekt')).length + 1,
+      audio: editor.tracks.filter(t => t.type === 'audio' || t.name.startsWith('A')).length + 1,
+    };
+    const prefix = type === 'video' ? 'V' : type === 'subtitle' ? 'T' : type === 'effect' ? 'FX' : 'A';
+    editor.addTrack(`${prefix}${counts[type]}`, type);
+    showAddTrackModal = false;
+  }
+
+  function handleGlobalDrop(e: DragEvent) {
+    e.preventDefault();
+    if (!e.dataTransfer) return;
+    const assetId = e.dataTransfer.getData('application/x-editor-asset');
+    if (!assetId) return;
+    const asset = editor.assets.find(a => a.id === assetId);
+    if (!asset) return;
+
+    const rect = container?.getBoundingClientRect();
+    if (!rect) return;
+    const mouseX = e.clientX - rect.left - effectiveHeaderWidth;
+    let dropTime = Math.max(0, (mouseX + editor.scrollX) / editor.zoom);
+
+    if (editor.tracks.length === 0) {
+      if (asset.type === 'video') {
+        const vTrack = editor.addTrack('V1', 'video');
+        editor.addClip(vTrack.id, asset.name, dropTime, asset.duration || 10, asset.color, asset.id, { type: 'video' });
+        const aTrack = editor.addTrack('A1', 'audio');
+        editor.addClip(aTrack.id, `${asset.name} (Ses)`, dropTime, asset.duration || 10, '#10b981', asset.id, { type: 'audio' });
+        triggerPreview(asset.id);
+      } else if (asset.type === 'audio') {
+        const aTrack = editor.addTrack('A1', 'audio');
+        editor.addClip(aTrack.id, asset.name, dropTime, asset.duration || 10, asset.color, asset.id, { type: 'audio' });
+      } else {
+        const vTrack = editor.addTrack('V1', 'video');
+        editor.addClip(vTrack.id, asset.name, dropTime, asset.duration || 10, asset.color, asset.id, { type: asset.type });
+      }
+      editor.announce(`"${asset.name}" zaman çizelgesine eklendi.`);
+      return;
+    }
+
+    let targetTrack: TimelineTrack | undefined;
+    if (asset.type === 'video' || asset.type === 'image') {
+      targetTrack = editor.tracks.find(t => t.type === 'video' || t.name.startsWith('V'));
+      if (!targetTrack) targetTrack = editor.addTrack('V1', 'video');
+    } else if (asset.type === 'audio') {
+      targetTrack = editor.tracks.find(t => t.type === 'audio' || t.name.startsWith('A'));
+      if (!targetTrack) targetTrack = editor.addTrack('A1', 'audio');
+    } else {
+      targetTrack = editor.tracks[0];
+    }
+
+    if (targetTrack) {
+      handleDrop(e, targetTrack.id);
+    }
+  }
+
   // Calculate visible ticks (very basic virtualization for ruler)
   let visibleDuration = $derived(
     (container && container.clientWidth) ? container.clientWidth / editor.zoom : editor.duration
@@ -908,89 +971,6 @@
   role="region"
   aria-label="Zaman Çizelgesi Düzenleyici"
 >
-  <!-- Integrated Timeline Header Toolbar (2026 Spatial Glass NLE Layout) -->
-  <div 
-    class="h-10 px-3.5 border-b border-white/10 spatial-glass-subtle flex items-center justify-between z-20 flex-none select-none"
-    data-no-scrub="true"
-    role="toolbar"
-    tabindex={0}
-    aria-label="Zaman çizelgesi araç çubuğu"
-    onpointerdown={(e) => e.stopPropagation()}
-  >
-    <div class="flex items-center gap-2">
-      <!-- Magnetic Mode Toggle -->
-      <button 
-        class="px-2.5 py-1 rounded-lg flex items-center gap-1.5 text-xs transition-all cursor-pointer {editor.isMagnetic ? 'bg-sky-500/20 text-sky-300 border border-sky-500/35 font-semibold shadow-[0_0_10px_rgba(56,189,248,0.2)]' : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5 border border-transparent'}"
-        onpointerdown={(e) => e.stopPropagation()}
-        onclick={(e) => { 
-          e.stopPropagation();
-          editor.isMagnetic = !editor.isMagnetic; 
-          editor.announce(editor.isMagnetic ? 'Manyetik mod açık' : 'Manyetik mod kapalı'); 
-        }}
-        title={editor.isMagnetic ? "Manyetik Mod (Klipler silindiğinde boşlukları otomatik kapatır) Açık" : "Manyetik Modu Aç"}
-      >
-        <Magnet size={13} />
-        <span class="text-[11px]">Manyetik</span>
-      </button>
-
-      <!-- Beat Snap Toggle -->
-      <button 
-        class="px-2.5 py-1 rounded-lg flex items-center gap-1.5 text-xs transition-all cursor-pointer {editor.snapToBeat ? 'bg-amber-500/20 text-amber-300 border border-amber-500/35 font-semibold shadow-[0_0_10px_rgba(245,158,11,0.2)]' : 'text-neutral-400 hover:text-neutral-200 hover:bg-white/5 border border-transparent'}"
-        onpointerdown={(e) => e.stopPropagation()}
-        onclick={(e) => { 
-          e.stopPropagation();
-          editor.snapToBeat = !editor.snapToBeat; 
-          editor.announce(editor.snapToBeat ? 'Ritim yakalama açık' : 'Ritim yakalama kapalı'); 
-        }}
-        title={editor.activeBpm ? `${editor.activeBpm} BPM Müzik Ritim Noktalarına Yakala` : "Ritim Yakalama (Müzik vuruşlarına hizalar)"}
-      >
-        <Music size={13} />
-        <span class="text-[11px]">{editor.activeBpm ? `${editor.activeBpm} BPM` : 'Ritim'}</span>
-      </button>
-
-      <!-- Split / Razor shortcut in timeline header -->
-      <button
-        class="hidden sm:flex px-2.5 py-1 rounded-lg items-center gap-1.5 text-xs text-neutral-400 hover:text-white hover:bg-white/5 transition-all cursor-pointer border border-transparent"
-        onpointerdown={(e) => e.stopPropagation()}
-        onclick={(e) => {
-          e.stopPropagation();
-          editor.splitClipAtPlayhead();
-        }}
-        title="Klibi Oynatma Kafasından Böl (C)"
-      >
-        <Scissors size={13} class="text-sky-400" />
-        <span class="text-[11px]">Böl (C)</span>
-      </button>
-    </div>
-
-    <!-- Zoom Controls -->
-    <div class="flex items-center gap-1.5 spatial-glass px-2 py-0.5 rounded-lg border border-white/10">
-      <button 
-        class="p-1 rounded text-neutral-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
-        onpointerdown={(e) => e.stopPropagation()}
-        onclick={(e) => {
-          e.stopPropagation();
-          setTimelineZoom(editor.zoom * 0.8);
-        }}
-        title="Zaman Çizelgesini Uzaklaştır"
-      >
-        <ZoomOut size={13} />
-      </button>
-      <span class="text-[11px] font-mono w-9 text-center text-neutral-300 font-semibold">{(editor.zoom).toFixed(0)}x</span>
-      <button 
-        class="p-1 rounded text-neutral-400 hover:text-white hover:bg-white/10 transition-colors cursor-pointer"
-        onpointerdown={(e) => e.stopPropagation()}
-        onclick={(e) => {
-          e.stopPropagation();
-          setTimelineZoom(editor.zoom * 1.25);
-        }}
-        title="Zaman Çizelgesini Yakınlaştır"
-      >
-        <ZoomIn size={13} />
-      </button>
-    </div>
-  </div>
-
   <!-- Timeline Body -->
   <div class="relative flex-1 flex overflow-hidden">
     
@@ -1010,43 +990,122 @@
         {#each editor.tracks as track, trackIndex}
           <div class="h-14 border-b border-white/5 flex items-center justify-between px-2 bg-neutral-950/40 hover:bg-white/[0.03] transition-colors">
             <div class="flex items-center gap-1.5 min-w-0">
-              {#if track.name.startsWith('V')}
-                <span class="px-2 py-0.5 rounded-lg text-[10px] font-extrabold font-mono bg-sky-500/20 text-sky-300 border border-sky-500/35 shadow-[0_0_8px_rgba(56,189,248,0.2)] select-none">V{trackIndex + 1}</span>
-              {:else if track.name.startsWith('A')}
-                <span class="px-2 py-0.5 rounded-lg text-[10px] font-extrabold font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/35 shadow-[0_0_8px_rgba(16,185,129,0.2)] select-none">A{trackIndex + 1}</span>
+              {#if track.type === 'video' || track.name.startsWith('V')}
+                <span class="px-1.5 py-0.5 rounded-lg text-[10px] font-extrabold font-mono bg-sky-500/20 text-sky-300 border border-sky-500/35 shadow-[0_0_8px_rgba(56,189,248,0.2)] select-none flex items-center gap-1">
+                  <Film size={10} />
+                  <span>{track.name}</span>
+                </span>
+              {:else if track.type === 'subtitle' || track.name.startsWith('T') || track.name.includes('Altyazı')}
+                <span class="px-1.5 py-0.5 rounded-lg text-[10px] font-extrabold font-mono bg-amber-500/20 text-amber-300 border border-amber-500/35 shadow-[0_0_8px_rgba(245,158,11,0.2)] select-none flex items-center gap-1">
+                  <Type size={10} />
+                  <span>{track.name}</span>
+                </span>
+              {:else if track.type === 'effect' || track.name.startsWith('FX') || track.name.includes('Efekt')}
+                <span class="px-1.5 py-0.5 rounded-lg text-[10px] font-extrabold font-mono bg-purple-500/20 text-purple-300 border border-purple-500/35 shadow-[0_0_8px_rgba(168,85,247,0.2)] select-none flex items-center gap-1">
+                  <Sparkles size={10} />
+                  <span>{track.name}</span>
+                </span>
+              {:else if track.type === 'audio' || track.name.startsWith('A')}
+                <span class="px-1.5 py-0.5 rounded-lg text-[10px] font-extrabold font-mono bg-emerald-500/20 text-emerald-300 border border-emerald-500/35 shadow-[0_0_8px_rgba(16,185,129,0.2)] select-none flex items-center gap-1">
+                  <Volume2 size={10} />
+                  <span>{track.name}</span>
+                </span>
               {:else}
-                <span class="px-2 py-0.5 rounded-lg text-[10px] font-bold font-mono bg-purple-500/20 text-purple-300 border border-purple-500/35 select-none truncate">{track.name}</span>
+                <span class="px-1.5 py-0.5 rounded-lg text-[10px] font-bold font-mono bg-purple-500/20 text-purple-300 border border-purple-500/35 select-none truncate">
+                  {track.name}
+                </span>
               {/if}
             </div>
             
             {#if !isMobileMode}
-            <div class="flex items-center gap-1">
+            <div class="flex items-center gap-0.5">
               <button 
-                class="w-6 h-6 rounded-lg flex items-center justify-center transition-all cursor-pointer {track.isMuted ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40 shadow-[0_0_6px_rgba(245,158,11,0.3)]' : 'text-neutral-500 hover:text-white hover:bg-white/10'}" 
+                class="w-5 h-5 rounded-md flex items-center justify-center transition-all cursor-pointer {track.isMuted ? 'bg-amber-500/20 text-amber-300 border border-amber-500/40' : 'text-neutral-500 hover:text-white hover:bg-white/10'}" 
                 onclick={() => { track.isMuted = !track.isMuted; editor.saveState(); }}
                 title={track.isMuted ? "Sesi Aç" : "Sesi Kapat (Mute)"}
               >
                 {#if track.isMuted}
-                  <VolumeX size={12} />
+                  <VolumeX size={11} />
                 {:else}
-                  <Volume2 size={12} />
+                  <Volume2 size={11} />
                 {/if}
               </button>
               <button 
-                class="w-6 h-6 rounded-lg flex items-center justify-center transition-all cursor-pointer {track.isLocked ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40 shadow-[0_0_6px_rgba(244,63,94,0.3)]' : 'text-neutral-500 hover:text-white hover:bg-white/10'}" 
+                class="w-5 h-5 rounded-md flex items-center justify-center transition-all cursor-pointer {track.isLocked ? 'bg-rose-500/20 text-rose-300 border border-rose-500/40' : 'text-neutral-500 hover:text-white hover:bg-white/10'}" 
                 onclick={() => { track.isLocked = !track.isLocked; editor.saveState(); }}
                 title={track.isLocked ? "Kilidi Aç" : "Kanalı Kilitle"}
               >
                 {#if track.isLocked}
-                  <Lock size={12} />
+                  <Lock size={11} />
                 {:else}
-                  <Unlock size={12} />
+                  <Unlock size={11} />
                 {/if}
               </button>
+              {#if track.clips.length === 0}
+                <button 
+                  class="w-5 h-5 rounded-md flex items-center justify-center transition-all text-neutral-500 hover:text-rose-400 hover:bg-rose-500/10 cursor-pointer" 
+                  onclick={() => editor.deleteTrack(track.id)}
+                  title="Boş Kanalı Sil"
+                >
+                  <Trash2 size={11} />
+                </button>
+              {/if}
             </div>
             {/if}
           </div>
         {/each}
+
+        <!-- Add Track Button in Rail -->
+        {#if !isMobileMode}
+          <div class="p-1 relative">
+            <button
+              onclick={() => showAddTrackModal = !showAddTrackModal}
+              class="w-full py-1 rounded-lg border border-dashed border-white/15 hover:border-white/30 text-[10px] font-mono text-neutral-400 hover:text-white flex items-center justify-center gap-1 transition-all cursor-pointer hover:bg-white/5"
+              title="Yeni Video, Altyazı, Efekt veya Ses Kanalı Ekle"
+            >
+              <Plus size={11} />
+              <span>Kanal</span>
+            </button>
+
+            {#if showAddTrackModal}
+              <!-- svelte-ignore a11y_click_events_have_key_events -->
+              <!-- svelte-ignore a11y_no_static_element_interactions -->
+              <div 
+                class="absolute left-full top-0 ml-2 z-50 w-36 spatial-glass rounded-xl p-1 shadow-2xl border border-white/15 flex flex-col gap-0.5 animate-in fade-in zoom-in-95 duration-100"
+                onclick={(e) => e.stopPropagation()}
+              >
+                <button 
+                  onclick={() => addNewTrack('video')}
+                  class="w-full px-2 py-1.5 rounded-lg text-left text-[11px] font-medium text-sky-300 hover:bg-sky-500/20 flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <Film size={12} />
+                  <span>+ Video (V)</span>
+                </button>
+                <button 
+                  onclick={() => addNewTrack('subtitle')}
+                  class="w-full px-2 py-1.5 rounded-lg text-left text-[11px] font-medium text-amber-300 hover:bg-amber-500/20 flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <Type size={12} />
+                  <span>+ Altyazı (T)</span>
+                </button>
+                <button 
+                  onclick={() => addNewTrack('effect')}
+                  class="w-full px-2 py-1.5 rounded-lg text-left text-[11px] font-medium text-purple-300 hover:bg-purple-500/20 flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <Sparkles size={12} />
+                  <span>+ Efekt (FX)</span>
+                </button>
+                <button 
+                  onclick={() => addNewTrack('audio')}
+                  class="w-full px-2 py-1.5 rounded-lg text-left text-[11px] font-medium text-emerald-300 hover:bg-emerald-500/20 flex items-center gap-1.5 transition-colors cursor-pointer"
+                >
+                  <Volume2 size={12} />
+                  <span>+ Ses (A)</span>
+                </button>
+              </div>
+            {/if}
+          </div>
+        {/if}
       </div>
     </div>
 
@@ -1096,14 +1155,32 @@
       </div>
 
       <!-- Tracks Container -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div 
         class="absolute top-7 left-0 right-0 bottom-0"
-        style="transform: translate3d(-{editor.scrollX}px, -{editor.scrollY}px, 0); width: {editor.duration * editor.zoom}px;"
+        style="transform: translate3d(-{editor.scrollX}px, -{editor.scrollY}px, 0); width: {Math.max(containerWidth, (editor.duration * editor.zoom) + 120)}px;"
+        ondragover={handleDragOver}
+        ondrop={handleGlobalDrop}
       >
-        {#if editor.tracks.every(t => t.clips.length === 0)}
+        {#if editor.tracks.length === 0 || editor.tracks.every(t => t.clips.length === 0)}
           <div class="absolute inset-0 flex flex-col items-center justify-center pointer-events-none text-neutral-500 gap-2 select-none z-0">
-            <p class="text-xs font-semibold text-neutral-300">Zaman Çizelgesi Boş</p>
-            <p class="text-[11px] text-neutral-500 font-mono">Medya havuzundan video veya ses sürükleyip kanala bırakın</p>
+            <div class="w-10 h-10 rounded-2xl bg-white/5 border border-white/10 flex items-center justify-center text-neutral-400">
+              <FolderClosed size={20} />
+            </div>
+            <p class="text-xs font-semibold text-neutral-300">Zaman Çizelgesi Hazır</p>
+            <p class="text-[11px] text-neutral-500 font-mono">Medya havuzundan video veya ses sürükleyip bırakın</p>
+          </div>
+        {/if}
+
+        <!-- Visual End of Video Cap -->
+        {#if maxClipEndTime > 0}
+          <div 
+            class="absolute top-0 bottom-0 w-[2px] bg-rose-500/80 z-20 pointer-events-none shadow-[0_0_10px_rgba(244,63,94,0.6)]"
+            style="transform: translate3d({maxClipEndTime * editor.zoom}px, 0, 0);"
+          >
+            <div class="absolute -top-6 -left-3 px-1.5 py-0.5 rounded bg-rose-600/90 text-white text-[8px] font-mono font-bold uppercase shadow tracking-tight">
+              Bitiş
+            </div>
           </div>
         {/if}
 
@@ -1206,12 +1283,12 @@
           <Trash2 size={18} />
         </button>
 
-        <!-- Action 4: Settings/Inspector (Left) -->
+        <!-- Action 4: Filters (Left) -->
         <button 
           class="absolute w-10 h-10 rounded-full bg-neutral-800/95 border border-white/10 text-neutral-300 flex items-center justify-center pointer-events-auto shadow-xl hover:bg-neutral-700 hover:scale-110 active:scale-95 transition-all backdrop-blur-md"
           style="left: calc(50% - 20px - 68px); top: calc(50% - 20px);"
-          onclick={() => { editor.openBottomSheet('inspector'); radialMenuContext = null; }}
-          title="Müfettiş"
+          onclick={() => { editor.mobileWorkspace = 'filters'; radialMenuContext = null; }}
+          title="Renk Filtreleri"
         >
           <Sliders size={18} />
         </button>

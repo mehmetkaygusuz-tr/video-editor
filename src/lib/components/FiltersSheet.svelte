@@ -2,10 +2,29 @@
   import { editor } from '../editor.svelte';
   import { FILTER_PRESETS } from '../filters';
   import { aiService } from '../engine/aiService.svelte';
-  import { Sliders, Sparkles, Check, X, RotateCcw } from '@lucide/svelte';
+  import { Sliders, Sparkles, Check, X, RotateCcw, ArrowLeft, Sun, Contrast, Droplets, Thermometer, Copy, ChevronLeft, ChevronRight, ChevronUp, ChevronDown } from '@lucide/svelte';
 
+  let { isBottomDocked = false, onClose } = $props<{ isBottomDocked?: boolean; onClose?: () => void }>();
+
+  let categoryScrollRef = $state<HTMLDivElement | null>(null);
   let selectedCategory = $state<'all' | 'cinematic' | 'creative' | 'vintage' | 'clean'>('all');
+  let applyScope = $state<'selected' | 'all'>('selected');
   let selectedClip = $derived(editor.getSelectedClip());
+
+  function scrollCategories(delta: number) {
+    if (categoryScrollRef) {
+      categoryScrollRef.scrollBy({ left: delta, behavior: 'smooth' });
+      editor.triggerHaptic('light');
+    }
+  }
+
+  function handleContainerScroll(e: UIEvent) {
+    const target = e.currentTarget as HTMLElement;
+    if (isBottomDocked && !editor.isBottomPanelExpanded && target.scrollTop > 8) {
+      editor.isBottomPanelExpanded = true;
+      editor.triggerHaptic('light');
+    }
+  }
 
   let filteredPresets = $derived.by(() => {
     if (selectedCategory === 'all') return FILTER_PRESETS;
@@ -13,15 +32,32 @@
   });
 
   function applyPreset(presetId: string) {
-    if (selectedClip) {
-      editor.applyFilterToClip(selectedClip.id, presetId);
-    } else {
+    if (applyScope === 'all' || !selectedClip) {
       editor.applyFilterToAllClips(presetId);
+    } else {
+      editor.applyFilterToClip(selectedClip.id, presetId);
     }
+    editor.triggerHaptic('light');
   }
 
   function resetGrading() {
-    if (selectedClip) {
+    if (applyScope === 'all' || !selectedClip) {
+      for (const track of editor.tracks) {
+        for (const clip of track.clips) {
+          if (clip.type !== 'audio' && clip.type !== 'text') {
+            clip.colorGrading = {
+              brightness: 0,
+              contrast: 1,
+              saturation: 1,
+              temperature: 0,
+              tint: 0
+            };
+          }
+        }
+      }
+      editor.saveState();
+      editor.announce('Tüm kliplerin renk ayarları sıfırlandı.');
+    } else {
       editor.updateClip(selectedClip.id, {
         colorGrading: {
           brightness: 0,
@@ -33,92 +69,313 @@
       });
       editor.announce('Klip renk ayarları sıfırlandı.');
     }
+    editor.triggerHaptic('medium');
+  }
+
+  function updateColorParam(param: 'brightness' | 'contrast' | 'saturation' | 'temperature', val: number) {
+    if (isBottomDocked && !editor.isBottomPanelExpanded) {
+      editor.isBottomPanelExpanded = true;
+    }
+    if (applyScope === 'all' || !selectedClip) {
+      for (const track of editor.tracks) {
+        for (const clip of track.clips) {
+          if (clip.type !== 'audio' && clip.type !== 'text') {
+            const current = clip.colorGrading || {
+              brightness: 0,
+              contrast: 1,
+              saturation: 1,
+              temperature: 0,
+              tint: 0
+            };
+            clip.colorGrading = {
+              ...current,
+              [param]: val
+            };
+          }
+        }
+      }
+      editor.saveState();
+    } else {
+      const current = selectedClip.colorGrading || {
+        brightness: 0,
+        contrast: 1,
+        saturation: 1,
+        temperature: 0,
+        tint: 0
+      };
+      editor.updateClip(selectedClip.id, {
+        colorGrading: {
+          ...current,
+          [param]: val
+        }
+      });
+    }
+  }
+
+  function copySelectedGradeToAll() {
+    if (!selectedClip || !selectedClip.colorGrading) return;
+    const grading = { ...selectedClip.colorGrading };
+    for (const track of editor.tracks) {
+      for (const clip of track.clips) {
+        if (clip.type !== 'audio' && clip.type !== 'text') {
+          clip.colorGrading = { ...grading };
+        }
+      }
+    }
+    editor.saveState();
+    editor.announce('Seçili klibin renk ayarı tüm video sahnelerine uygulandı.');
+    editor.triggerHaptic('medium');
+  }
+
+  function handleClose() {
+    if (onClose) onClose();
+    else editor.mobileWorkspace = 'timeline';
   }
 </script>
 
-<div class="w-full flex flex-col p-4 md:p-6 space-y-4 max-h-[80vh] overflow-y-auto custom-scrollbar select-none">
-  <!-- Header -->
-  <div class="flex items-center justify-between pb-3 border-b border-white/10">
-    <div class="flex items-center gap-2">
-      <div class="p-2 rounded-xl bg-purple-500/10 border border-purple-500/20 text-purple-400">
-        <Sliders size={18} />
-      </div>
-      <div>
-        <h3 class="text-sm font-bold text-white">Sinematik Renk Filtreleri & LUT</h3>
-        <p class="text-[11px] text-neutral-400">Oklab renk uzayında kayıpsız donanım hızlandırmalı filtreler</p>
+<div class="w-full h-full flex flex-col {isBottomDocked ? 'p-2.5 sm:p-3 overflow-hidden bg-neutral-950/70 backdrop-blur-md' : 'p-4 md:p-6 space-y-4 max-h-[80vh] overflow-y-auto custom-scrollbar select-none'}">
+  <!-- Top Navigation & Control Bar -->
+  <div class="flex-none flex items-center justify-between pb-2 border-b border-white/10 gap-2">
+    <div class="flex items-center gap-2 min-w-0">
+      {#if isBottomDocked}
+        <button
+          onclick={handleClose}
+          class="flex items-center gap-1.5 px-3 py-1.5 rounded-xl bg-sky-500/20 hover:bg-sky-500/30 text-sky-300 border border-sky-500/35 text-xs font-semibold active:scale-95 transition-all cursor-pointer flex-none shadow-sm"
+          title="Zaman Çizelgesine Geri Dön"
+        >
+          <ArrowLeft size={13} />
+          <span>Zaman Çizelgesi</span>
+        </button>
+      {/if}
+
+      <div class="flex items-center gap-1.5 min-w-0">
+        <div class="p-1.5 rounded-lg bg-cyan-500/15 border border-cyan-500/25 text-cyan-400 flex-none hidden sm:flex">
+          <Sliders size={15} />
+        </div>
+        <div class="truncate">
+          <h3 class="text-xs font-bold text-white truncate">Renk Filtreleri & LUT</h3>
+          <p class="text-[10px] text-neutral-400 hidden sm:block">Oklab Donanım Hızlandırmalı Renkler</p>
+        </div>
       </div>
     </div>
 
-    <!-- AI Auto-Color Button -->
+    <!-- Right Quick Actions: Scope Selector, AI Auto-Color & Reset -->
+    <div class="flex items-center gap-1.5 flex-none">
+      {#if isBottomDocked}
+        <button
+          onclick={() => {
+            editor.isBottomPanelExpanded = !editor.isBottomPanelExpanded;
+            editor.triggerHaptic('light');
+          }}
+          class="flex items-center gap-1 px-2.5 py-1 rounded-xl bg-white/5 hover:bg-white/10 text-neutral-300 text-[10px] font-semibold transition-all border border-white/10 cursor-pointer shadow-sm"
+          title={editor.isBottomPanelExpanded ? "Paneli Daralt" : "Paneli Genişlet"}
+        >
+          {#if editor.isBottomPanelExpanded}
+            <ChevronDown size={13} class="text-cyan-400" />
+            <span class="hidden xs:inline">Daralt</span>
+          {:else}
+            <ChevronUp size={13} class="text-cyan-400" />
+            <span class="hidden xs:inline">Genişlet</span>
+          {/if}
+        </button>
+      {/if}
+
+      <div class="flex items-center spatial-glass rounded-xl p-0.5 border border-white/10 text-[10px]">
+        <button
+          onclick={() => applyScope = 'selected'}
+          class="px-2 py-1 rounded-lg transition-all font-semibold {applyScope === 'selected' ? 'bg-cyan-500/25 text-cyan-300 font-bold border border-cyan-500/40 shadow-sm' : 'text-neutral-400 hover:text-white'}"
+          title="Filtre ve ayarları sadece seçili klibe uygula"
+        >
+          Seçili Klip
+        </button>
+        <button
+          onclick={() => applyScope = 'all'}
+          class="px-2 py-1 rounded-lg transition-all font-semibold {applyScope === 'all' ? 'bg-cyan-500/25 text-cyan-300 font-bold border border-cyan-500/40 shadow-sm' : 'text-neutral-400 hover:text-white'}"
+          title="Filtre ve renk ayarlarını tüm kesilmiş video sahnelerine aynı anda uygula"
+        >
+          Tüm Klipler
+        </button>
+      </div>
+
+      {#if selectedClip && applyScope === 'selected'}
+        <button
+          onclick={copySelectedGradeToAll}
+          class="hidden sm:flex items-center gap-1 px-2 py-1 rounded-xl bg-white/5 hover:bg-white/15 text-neutral-300 hover:text-white border border-white/10 text-[10px] font-medium transition-all cursor-pointer"
+          title="Bu klibin renk ayarlarını diğer tüm kesilmiş video parçalarına tek tıkla kopyala"
+        >
+          <Copy size={11} />
+          <span>Tümüne Yay</span>
+        </button>
+      {/if}
+
+      <button
+        onclick={() => aiService.autoColorEnhance()}
+        disabled={aiService.isRunning}
+        class="px-2.5 py-1 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-[11px] font-semibold flex items-center gap-1 shadow-md shadow-purple-900/30 transition-all cursor-pointer disabled:opacity-50"
+        title="Yapay zeka ile sahne ışığını analiz et ve sinematik renk uygula"
+      >
+        <Sparkles size={12} class={aiService.isRunning ? 'animate-spin' : ''} />
+        <span class="hidden sm:inline">AI Renk</span>
+      </button>
+
+      <button
+        onclick={resetGrading}
+        class="p-1.5 rounded-xl bg-neutral-800/80 hover:bg-neutral-800 text-neutral-400 hover:text-white transition-colors cursor-pointer"
+        title="Renkleri Sıfırla"
+      >
+        <RotateCcw size={13} />
+      </button>
+    </div>
+  </div>
+
+  <!-- Category Pills (Horizontal scroll with Smooth Left/Right Arrow Navigation) -->
+  <div class="flex-none flex items-center gap-1 py-1.5 relative w-full">
     <button
-      onclick={() => aiService.autoColorEnhance()}
-      disabled={aiService.isRunning}
-      class="px-3 py-1.5 rounded-xl bg-gradient-to-r from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-white text-xs font-semibold flex items-center gap-1.5 shadow-md shadow-purple-900/30 transition-all cursor-pointer disabled:opacity-50"
-      title="Yapay zeka ile sahne ışığını analiz et ve sinematik renk uygula"
+      type="button"
+      onclick={() => scrollCategories(-120)}
+      class="flex-none p-1 rounded-lg bg-neutral-900/90 hover:bg-neutral-800 text-neutral-400 hover:text-white border border-white/10 active:scale-95 transition-all shadow-sm cursor-pointer"
+      title="Sola Kaydır"
     >
-      <Sparkles size={13} class={aiService.isRunning ? 'animate-spin' : ''} />
-      <span>AI Akıllı Renk</span>
+      <ChevronLeft size={13} />
+    </button>
+
+    <div 
+      bind:this={categoryScrollRef}
+      class="flex-1 flex items-center gap-1.5 overflow-x-auto scroll-smooth no-scrollbar [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] px-0.5"
+    >
+      {#each [
+        { id: 'all', label: 'Tümü' },
+        { id: 'cinematic', label: 'Sinematik' },
+        { id: 'creative', label: 'Yaratıcı' },
+        { id: 'vintage', label: 'Nostalji 90s' },
+        { id: 'clean', label: 'Temiz / Reklam' }
+      ] as cat}
+        <button
+          onclick={() => selectedCategory = cat.id as any}
+          class="px-2.5 py-1 rounded-full text-[11px] font-medium transition-colors whitespace-nowrap cursor-pointer {selectedCategory === cat.id ? 'bg-cyan-500/20 text-cyan-300 border border-cyan-500/40 font-bold shadow-sm' : 'bg-neutral-900 border border-white/5 text-neutral-400 hover:text-white'}"
+        >
+          {cat.label}
+        </button>
+      {/each}
+    </div>
+
+    <button
+      type="button"
+      onclick={() => scrollCategories(120)}
+      class="flex-none p-1 rounded-lg bg-neutral-900/90 hover:bg-neutral-800 text-neutral-400 hover:text-white border border-white/10 active:scale-95 transition-all shadow-sm cursor-pointer"
+      title="Sağa Kaydır"
+    >
+      <ChevronRight size={13} />
     </button>
   </div>
 
-  <!-- Category Pills -->
-  <div class="flex items-center gap-1.5 overflow-x-auto pb-1">
-    {#each [
-      { id: 'all', label: 'Tümü' },
-      { id: 'cinematic', label: 'Sinematik' },
-      { id: 'creative', label: 'Yaratıcı' },
-      { id: 'vintage', label: 'Nostalji 90s' },
-      { id: 'clean', label: 'Temiz / Reklam' }
-    ] as cat}
-      <button
-        onclick={() => selectedCategory = cat.id as any}
-        class="px-3 py-1 rounded-full text-xs font-medium transition-colors whitespace-nowrap cursor-pointer {selectedCategory === cat.id ? 'bg-white text-neutral-950 font-bold' : 'bg-neutral-800 text-neutral-400 hover:text-white'}"
-      >
-        {cat.label}
-      </button>
-    {/each}
-  </div>
-
-  <!-- Presets Grid -->
-  <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
-    {#each filteredPresets as preset}
-      {@const isCurrent = selectedClip?.colorGrading?.lut === preset.grading.lut}
-      <button
-        onclick={() => applyPreset(preset.id)}
-        class="p-3.5 rounded-2xl border text-left transition-all cursor-pointer group relative overflow-hidden flex flex-col justify-between {isCurrent ? 'border-purple-500 bg-purple-950/20 shadow-lg shadow-purple-950/20' : 'border-white/5 bg-neutral-950 hover:border-white/20'}"
-      >
-        <div>
-          <!-- Gradient visual bar -->
-          <div class="w-full h-8 rounded-xl mb-2.5 shadow-inner transition-transform group-hover:scale-[1.02]" style="background: {preset.previewGradient};"></div>
-          
-          <div class="flex items-center justify-between">
-            <span class="text-xs font-bold text-white group-hover:text-purple-300 transition-colors">{preset.name}</span>
-            {#if isCurrent}
-              <Check size={14} class="text-purple-400" />
-            {/if}
+  <!-- Main Scrollable Area: Presets & Live Fine-Tuning Sliders -->
+  <div 
+    onscroll={handleContainerScroll}
+    class="flex-1 overflow-y-auto space-y-3 custom-scrollbar min-h-0 pr-1 transition-all"
+  >
+    
+    <!-- Presets Grid / Horizontal Scroll for Mobile -->
+    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-2">
+      {#each filteredPresets as preset}
+        {@const isCurrent = selectedClip?.colorGrading?.lut === preset.grading.lut}
+        <button
+          onclick={() => applyPreset(preset.id)}
+          class="p-2.5 rounded-xl border text-left transition-all cursor-pointer group relative overflow-hidden flex flex-col justify-between {isCurrent ? 'border-cyan-400 bg-cyan-950/30 shadow-[0_0_12px_rgba(34,211,238,0.25)]' : 'border-white/5 bg-neutral-950/80 hover:border-white/20'}"
+        >
+          <div>
+            <!-- Gradient visual preview bar -->
+            <div class="w-full h-7 rounded-lg mb-1.5 shadow-inner transition-transform group-hover:scale-[1.02]" style="background: {preset.previewGradient};"></div>
+            
+            <div class="flex items-center justify-between">
+              <span class="text-[11px] font-bold text-white group-hover:text-cyan-300 transition-colors truncate">{preset.name}</span>
+              {#if isCurrent}
+                <Check size={13} class="text-cyan-400 flex-none" />
+              {/if}
+            </div>
+            <p class="text-[9px] text-neutral-400 mt-0.5 line-clamp-1">{preset.description}</p>
           </div>
-          <p class="text-[11px] text-neutral-400 mt-1 leading-snug line-clamp-2">{preset.description}</p>
-        </div>
-
-        <div class="flex items-center justify-between mt-3 pt-2 border-t border-white/5 text-[10px] text-neutral-500 font-mono">
-          <span>Kontrast: {preset.grading.contrast}x</span>
-          <span class="text-purple-400 group-hover:underline">Uygula →</span>
-        </div>
-      </button>
-    {/each}
-  </div>
-
-  <!-- Footer Actions -->
-  {#if selectedClip}
-    <div class="flex items-center justify-between pt-2 border-t border-white/5">
-      <span class="text-xs text-neutral-400 font-mono truncate max-w-xs">Seçili Klip: {selectedClip.name}</span>
-      <button
-        onclick={resetGrading}
-        class="px-3 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-300 hover:text-white text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
-      >
-        <RotateCcw size={12} />
-        <span>Rengi Sıfırla</span>
-      </button>
+        </button>
+      {/each}
     </div>
-  {/if}
+
+    <!-- Quick Live Adjustment Sliders (When a clip is selected) -->
+    {#if selectedClip}
+      {@const grading = selectedClip.colorGrading || { brightness: 0, contrast: 1, saturation: 1, temperature: 0 }}
+      <div class="p-2.5 rounded-xl bg-neutral-900/60 border border-white/5 space-y-2">
+        <span class="text-[10px] font-mono uppercase tracking-wider text-neutral-400 font-semibold block">Manuel İnce Ayar (Canlı Önizleme)</span>
+        
+        <div class="grid grid-cols-2 sm:grid-cols-4 gap-2 text-xs">
+          <!-- Exposure / Brightness -->
+          <div class="flex flex-col gap-1 bg-neutral-950/60 p-2 rounded-lg border border-white/5">
+            <div class="flex items-center justify-between text-[10px]">
+              <span class="text-neutral-400 flex items-center gap-1"><Sun size={11} /> Pozlama</span>
+              <span class="font-mono text-cyan-400">{(grading.brightness || 0).toFixed(2)}</span>
+            </div>
+            <input 
+              type="range" 
+              min="-0.5" 
+              max="0.5" 
+              step="0.02" 
+              value={grading.brightness || 0}
+              oninput={(e) => updateColorParam('brightness', parseFloat((e.target as HTMLInputElement).value))}
+              class="accent-cyan-400 h-1 bg-neutral-800 rounded appearance-none cursor-pointer"
+            />
+          </div>
+
+          <!-- Contrast -->
+          <div class="flex flex-col gap-1 bg-neutral-950/60 p-2 rounded-lg border border-white/5">
+            <div class="flex items-center justify-between text-[10px]">
+              <span class="text-neutral-400 flex items-center gap-1"><Contrast size={11} /> Kontrast</span>
+              <span class="font-mono text-purple-400">{(grading.contrast ?? 1).toFixed(2)}</span>
+            </div>
+            <input 
+              type="range" 
+              min="0.5" 
+              max="1.8" 
+              step="0.05" 
+              value={grading.contrast ?? 1}
+              oninput={(e) => updateColorParam('contrast', parseFloat((e.target as HTMLInputElement).value))}
+              class="accent-purple-400 h-1 bg-neutral-800 rounded appearance-none cursor-pointer"
+            />
+          </div>
+
+          <!-- Saturation -->
+          <div class="flex flex-col gap-1 bg-neutral-950/60 p-2 rounded-lg border border-white/5">
+            <div class="flex items-center justify-between text-[10px]">
+              <span class="text-neutral-400 flex items-center gap-1"><Droplets size={11} /> Doygunluk</span>
+              <span class="font-mono text-emerald-400">{(grading.saturation ?? 1).toFixed(2)}</span>
+            </div>
+            <input 
+              type="range" 
+              min="0" 
+              max="2" 
+              step="0.05" 
+              value={grading.saturation ?? 1}
+              oninput={(e) => updateColorParam('saturation', parseFloat((e.target as HTMLInputElement).value))}
+              class="accent-emerald-400 h-1 bg-neutral-800 rounded appearance-none cursor-pointer"
+            />
+          </div>
+
+          <!-- Temperature -->
+          <div class="flex flex-col gap-1 bg-neutral-950/60 p-2 rounded-lg border border-white/5">
+            <div class="flex items-center justify-between text-[10px]">
+              <span class="text-neutral-400 flex items-center gap-1"><Thermometer size={11} /> Sıcaklık</span>
+              <span class="font-mono text-amber-400">{(grading.temperature || 0).toFixed(2)}</span>
+            </div>
+            <input 
+              type="range" 
+              min="-0.5" 
+              max="0.5" 
+              step="0.02" 
+              value={grading.temperature || 0}
+              oninput={(e) => updateColorParam('temperature', parseFloat((e.target as HTMLInputElement).value))}
+              class="accent-amber-400 h-1 bg-neutral-800 rounded appearance-none cursor-pointer"
+            />
+          </div>
+        </div>
+      </div>
+    {/if}
+
+  </div>
 </div>

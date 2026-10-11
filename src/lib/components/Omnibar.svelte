@@ -76,7 +76,7 @@
       role="dialog"
       aria-modal="true"
       tabindex={-1}
-      aria-label="Doğal Dil Kurgu Asistanı"
+      aria-label="AI Video Komut Asistanı"
     >
       <!-- Dynamic AI Feedback Pill -->
       {#if statusState !== 'idle'}
@@ -115,7 +115,7 @@
           onfocus={() => isFocused = true}
           onblur={() => isFocused = false}
           disabled={aiService.isRunning || editor.isProcessing}
-          placeholder={aiService.isRunning || editor.isProcessing ? "AI Kurgu İşlemi Yürütülüyor..." : "Doğal dille kurgula (Örn: 'Sessizlikleri sil', 'Altyazı üret', '2x hızlandır')"}
+          placeholder={aiService.isRunning || editor.isProcessing ? "AI İşlemi Yürütülüyor..." : "AI Video Asistanı (Örn: 'Sessizlikleri sil', 'Altyazı üret', '2x hızlandır', '9:16 dikey yap')"}
           class="flex-1 bg-transparent border-none text-sm text-white placeholder-neutral-500 focus:outline-none focus:ring-0 px-3 min-w-0"
         />
         
@@ -144,7 +144,7 @@
       </form>
 
       <!-- Quick Action Suggestion Chips -->
-      <div class="flex items-center gap-1.5 overflow-x-auto py-2 px-1">
+      <div class="flex items-center gap-1.5 overflow-x-auto py-2 px-1 no-scrollbar [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none]">
         {#each [
           { label: '🎙️ Sessizlikleri Sil', cmd: 'Sessizlikleri sil ve akıcı bağla' },
           { label: '💬 Altyazı Üret', cmd: 'Otomatik altyazı üret' },
@@ -154,6 +154,8 @@
           { label: '🎨 Sinematik Renk', cmd: 'Sinematik renk iyileştirme uygula' },
           { label: '🧹 Dip Gürültü Temizle', cmd: 'Dip gürültüyü temizle' },
           { label: '🔥 Viral Kanca', cmd: 'Viral kanca üret' },
+          { label: '📤 4K Dışa Aktar', cmd: 'Dışa aktar' },
+          { label: '🔇 Sessize Al', cmd: 'Sessize al' },
           { label: '🤖 AI Kontrol Merkezi', cmd: 'AI kontrol merkezini aç' }
         ] as chip}
           <button
@@ -176,7 +178,7 @@
           <span class="flex items-center gap-1"><kbd class="px-1.5 py-0.5 bg-neutral-800 border border-white/10 rounded font-mono text-[10px]">Enter</kbd> Çalıştır</span>
           <span class="flex items-center gap-1"><kbd class="px-1.5 py-0.5 bg-neutral-800 border border-white/10 rounded font-mono text-[10px]">Esc</kbd> Kapat</span>
         </div>
-        <span class="text-neutral-500">Doğal Dil Kurgu Asistanı</span>
+        <span class="text-neutral-500">AI Video Komut Asistanı</span>
       </div>
     </div>
   </div>

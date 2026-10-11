@@ -4,7 +4,7 @@ import type {
   TransitionType, SubtitleStyle, SubtitlePresetStyle,
   SpeedCurveConfig, SpeedCurvePreset, AudioEnvelopeConfig,
   ScrubbingMode, DecoderTelemetry, AudioClockTelemetry, GpuTelemetry, AgentTelemetry,
-  AppSettingsConfig, ThemeId
+  AppSettingsConfig, ThemeId, TrackType
 } from './types';
 import { get, set } from 'idb-keyval';
 import { getFileFromOPFS, deleteFileFromOPFS } from './opfs';
@@ -62,9 +62,9 @@ class VideoEditor {
   scrollY = $state(0); 
   selectedClipId = $state<string | null>(null);
   announcement = $state<string>('');
-  activeSidebarTab = $state<'media' | 'ai' | 'inspector' | 'captions' | 'templates' | 'filters'>('media');
-  mobileWorkspace = $state<'timeline' | 'media' | 'ai' | 'captions' | 'inspector' | 'templates'>('timeline');
-  activeBottomSheet = $state<'media' | 'ai' | 'inspector' | 'captions' | 'templates' | 'transitions' | 'subtitle_style' | 'speed_curve' | 'audio_envelope' | 'filters' | 'settings' | null>(null);
+  activeSidebarTab = $state<'media' | 'ai' | 'captions' | 'templates' | 'filters'>('media');
+  mobileWorkspace = $state<'timeline' | 'media' | 'ai' | 'captions' | 'templates' | 'filters'>('timeline');
+  activeBottomSheet = $state<'media' | 'ai' | 'captions' | 'templates' | 'transitions' | 'subtitle_style' | 'speed_curve' | 'audio_envelope' | 'filters' | 'settings' | null>(null);
   activeTransitionCut = $state<{ trackId: string; prevClipId: string; nextClipId: string } | null>(null);
   aspectRatio = $state<'original' | '16:9' | '9:16' | '1:1'>('original');
   originalWidth = $state<number>(1920);
@@ -77,6 +77,8 @@ class VideoEditor {
 
 
   isTimelineCollapsed = $state(false);
+  isBottomPanelExpanded = $state(false);
+  isExportOpen = $state(false);
 
   // Step 1: GOP-Aware Two-Tier Scrubbing & Decoder Telemetry
   scrubbingMode = $state<ScrubbingMode>('adaptive');
@@ -183,7 +185,7 @@ class VideoEditor {
     }
   }
 
-  openBottomSheet(tab: 'media' | 'ai' | 'inspector' | 'captions' | 'templates' | 'transitions' | 'subtitle_style' | 'speed_curve' | 'audio_envelope' | 'filters' | 'settings') {
+  openBottomSheet(tab: 'media' | 'ai' | 'captions' | 'templates' | 'transitions' | 'subtitle_style' | 'speed_curve' | 'audio_envelope' | 'filters' | 'settings') {
     this.activeBottomSheet = tab;
     if (tab !== 'transitions' && tab !== 'subtitle_style' && tab !== 'speed_curve' && tab !== 'audio_envelope' && tab !== 'filters' && tab !== 'settings') {
       this.activeSidebarTab = tab;
@@ -291,8 +293,6 @@ class VideoEditor {
           this.tracks = data.tracks;
         } else {
           this.tracks = [];
-          this.addTrack('V1');
-          this.addTrack('A1');
         }
         this.assets = Array.isArray(data.assets) ? data.assets : [];
         
@@ -320,14 +320,11 @@ class VideoEditor {
       } else {
         this.tracks = [];
         this.assets = [];
-        this.addTrack('V1');
-        this.addTrack('A1');
       }
     } catch (e) {
       console.warn('Failed to restore persistence state:', e);
-      if (this.tracks.length === 0) {
-        this.addTrack('V1');
-        this.addTrack('A1');
+      if (!this.tracks) {
+        this.tracks = [];
       }
     } finally {
       this.isHydrated = true;
@@ -508,13 +505,53 @@ class VideoEditor {
     this.saveState();
   }
 
-  addTrack(name: string) {
-    this.tracks.push({
+  addTrack(name: string, type?: TrackType): TimelineTrack {
+    let resolvedType: TrackType = type || (
+      name.startsWith('V') ? 'video' :
+      name.startsWith('T') || name.toLowerCase().includes('altyazı') || name.toLowerCase().includes('metin') ? 'subtitle' :
+      name.startsWith('FX') || name.toLowerCase().includes('efekt') ? 'effect' :
+      name.startsWith('A') || name.toLowerCase().includes('ses') || name.toLowerCase().includes('müzik') ? 'audio' :
+      'video'
+    );
+
+    const newTrack: TimelineTrack = {
       id: crypto.randomUUID(),
       name,
+      type: resolvedType,
       clips: []
-    });
+    };
+
+    // Logical hierarchy ordering: Video -> Subtitle -> Effect -> Audio
+    const typePriority: Record<TrackType, number> = {
+      video: 1,
+      subtitle: 2,
+      effect: 3,
+      audio: 4
+    };
+
+    const targetPriority = typePriority[resolvedType] || 2;
+    let insertIndex = this.tracks.length;
+    for (let i = 0; i < this.tracks.length; i++) {
+      const curPriority = typePriority[this.tracks[i].type || 'video'] || 1;
+      if (targetPriority < curPriority) {
+        insertIndex = i;
+        break;
+      }
+    }
+
+    this.tracks.splice(insertIndex, 0, newTrack);
     this.saveState();
+    return newTrack;
+  }
+
+  deleteTrack(trackId: string) {
+    const idx = this.tracks.findIndex(t => t.id === trackId);
+    if (idx !== -1) {
+      this.tracks.splice(idx, 1);
+      this.saveState();
+      this.announce('Kanal silindi.');
+      this.triggerHaptic('medium');
+    }
   }
 
   async applyMagicTemplate(templateId: string, audioAssetId: string, videoAssetIds: string[]) {
@@ -575,11 +612,11 @@ class VideoEditor {
 
       // Clear existing tracks
       this.tracks = [];
-      this.addTrack('V1');
-      this.addTrack('A1');
+      const vTrack = this.addTrack('V1', 'video');
+      const aTrack = this.addTrack('A1', 'audio');
 
       // Add full audio to A1
-      this.addClip('A1', audioAsset.name, 0, audioAsset.duration || 60, audioAsset.color, audioAsset.id, { type: 'audio' });
+      this.addClip(aTrack.id, audioAsset.name, 0, audioAsset.duration || 60, audioAsset.color, audioAsset.id, { type: 'audio' });
 
       // Apply video clips matching template rhythm
       if (videoAssetIds.length > 0) {
@@ -1126,7 +1163,12 @@ class VideoEditor {
       type: targetClip.type,
       cropRect: targetClip.cropRect ? { ...targetClip.cropRect } : undefined,
       isBgRemoved: targetClip.isBgRemoved,
+      colorGrading: targetClip.colorGrading ? { ...targetClip.colorGrading } : undefined,
       volume: targetClip.volume,
+      speed: targetClip.speed,
+      speedCurve: targetClip.speedCurve ? JSON.parse(JSON.stringify(targetClip.speedCurve)) : undefined,
+      audioEnvelope: targetClip.audioEnvelope ? { ...targetClip.audioEnvelope } : undefined,
+      reframeKeyframes: targetClip.reframeKeyframes ? [...targetClip.reframeKeyframes] : undefined,
       subtitles: secondSubs
     };
 
@@ -1289,6 +1331,10 @@ class VideoEditor {
   }
 
   togglePlayback() {
+    if (!this.isPlaying && this.duration > 0 && this.playhead >= this.duration - 0.05) {
+      this.playhead = 0;
+      masterAudioClock.seek(0, this.tracks);
+    }
     this.isPlaying = !this.isPlaying;
     if (this.isPlaying) {
       masterAudioClock.start(this.playhead, this.tracks, 1.0);

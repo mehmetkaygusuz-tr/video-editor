@@ -3,12 +3,20 @@
   import { aiService } from '../engine/aiService.svelte';
   import { 
     Scissors, Trash2, Volume2, FastForward, Sparkles, Layers, 
-    Crop, FolderClosed, Music, Type, X, ChevronUp, ChevronDown,
+    Crop, FolderClosed, Music, Type, X, ChevronUp, ChevronDown, ChevronLeft, ChevronRight,
     SlidersHorizontal, Copy, RefreshCw, ZoomIn, Eye, EyeOff, Shuffle,
     Gauge, Sliders, Palette, Zap, Undo2, Redo2, Magnet, Play, Pause
   } from '@lucide/svelte';
 
   let selectedClip = $derived(editor.getSelectedClip());
+  let scrollContainerRef = $state<HTMLDivElement | null>(null);
+
+  function scrollHorizontal(delta: number) {
+    if (scrollContainerRef) {
+      scrollContainerRef.scrollBy({ left: delta, behavior: 'smooth' });
+      editor.triggerHaptic('light');
+    }
+  }
 
   // Quick speed options
   const speeds = [0.5, 1, 1.5, 2];
@@ -67,12 +75,6 @@
     editor.announce(editor.isMagnetic ? 'Manyetik kurgu açık' : 'Manyetik kurgu kapalı');
   }
 
-  function formatTimecode(seconds: number): string {
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = Math.floor(seconds % 60);
-    const f = Math.floor((seconds % 1) * 30);
-    return `${String(m).padStart(2, '0')}:${String(s).padStart(2, '0')}:${String(f).padStart(2, '0')}`;
-  }
 </script>
 
 <!-- 2026 Mobile Contextual Bottom Production Bar & Thumb Zone -->
@@ -81,85 +83,6 @@
   style="padding-bottom: max(8px, env(safe-area-inset-bottom, 0px));"
   aria-label="Mobil Kurgu ve Eylem Çubuğu"
 >
-  <!-- 1. Mobile Quick Utility Bar (Undo, Redo, Quick Split, Timecode, Snap, AI Director) -->
-  <div class="w-full flex items-center justify-between px-3 py-1.5 border-b border-white/5 bg-neutral-950/40 text-xs">
-    <!-- Left: Undo / Redo & Quick Split -->
-    <div class="flex items-center gap-1">
-      <button
-        type="button"
-        onclick={() => { editor.undo(); editor.triggerHaptic('light'); }}
-        disabled={!editor.canUndo}
-        class="w-7 h-7 rounded-lg flex items-center justify-center text-neutral-400 hover:text-white disabled:opacity-25 active:scale-90 transition-all cursor-pointer"
-        title="Geri Al"
-      >
-        <Undo2 size={14} />
-      </button>
-
-      <button
-        type="button"
-        onclick={() => { editor.redo(); editor.triggerHaptic('light'); }}
-        disabled={!editor.canRedo}
-        class="w-7 h-7 rounded-lg flex items-center justify-center text-neutral-400 hover:text-white disabled:opacity-25 active:scale-90 transition-all cursor-pointer"
-        title="Yinele"
-      >
-        <Redo2 size={14} />
-      </button>
-
-      <div class="w-px h-3.5 bg-white/10 mx-0.5"></div>
-
-      <!-- Quick Razor Split at current playhead -->
-      <button
-        type="button"
-        onclick={handleSplit}
-        class="flex items-center gap-1 px-2 py-1 rounded-lg bg-sky-500/15 text-sky-300 border border-sky-500/25 text-[11px] font-medium active:scale-95 transition-all cursor-pointer"
-        title="İğne Konumundan Kes"
-      >
-        <Scissors size={12} />
-        <span>Böl</span>
-      </button>
-    </div>
-
-    <!-- Center: Timecode Badge with Live Indicator -->
-    <div class="flex items-center gap-1.5 px-2.5 py-0.5 rounded-full bg-white/5 border border-white/10 font-mono text-[11px] text-neutral-300 shadow-inner">
-      <span class="w-1.5 h-1.5 rounded-full {editor.isPlaying ? 'bg-rose-500 animate-ping' : 'bg-emerald-400'}"></span>
-      <span>{formatTimecode(editor.playhead)}</span>
-    </div>
-
-    <!-- Right: Magnet Snap, AI Director & Focus Mode -->
-    <div class="flex items-center gap-1">
-      <!-- Magnetic Snapping -->
-      <button
-        type="button"
-        onclick={toggleMagnetic}
-        class="p-1.5 rounded-lg transition-colors cursor-pointer {editor.isMagnetic ? 'text-amber-400 bg-amber-500/15' : 'text-neutral-500 hover:text-neutral-300'}"
-        title={editor.isMagnetic ? "Manyetik Yapışma Açık" : "Manyetik Yapışma Kapalı"}
-      >
-        <Magnet size={13} />
-      </button>
-
-      <!-- AI Copilot Trigger -->
-      <button
-        type="button"
-        onclick={() => { editor.isCommandPaletteOpen = true; editor.triggerHaptic('light'); }}
-        class="flex items-center gap-1 px-2 py-0.5 rounded-full bg-gradient-to-r from-purple-600/30 to-cyan-500/30 border border-purple-500/40 text-purple-200 text-[10px] font-semibold active:scale-95 transition-all cursor-pointer"
-        title="AI Kurgu Asistanı (⌘K)"
-      >
-        <Sparkles size={11} class="text-purple-300" />
-        <span>AI</span>
-      </button>
-
-      <!-- Focus Mode Toggle (Expand/Collapse Timeline) -->
-      <button
-        type="button"
-        onclick={toggleFocusMode}
-        class="p-1.5 rounded-lg transition-colors cursor-pointer {editor.isTimelineCollapsed ? 'text-purple-400 bg-purple-500/15' : 'text-neutral-500 hover:text-neutral-300'}"
-        title={editor.isTimelineCollapsed ? "Zaman Çizelgesini Göster" : "Odak Önizleme Modu (Zaman Çizelgesini Gizle)"}
-      >
-        <Layers size={13} />
-      </button>
-    </div>
-  </div>
-
   <!-- 2. Popover Sub-controls (Volume Slider & Speed Picker) -->
   {#if selectedClip && showVolumeSlider}
     <div class="w-full px-4 sm:px-6 py-2.5 bg-neutral-900/95 border-b border-white/10 flex items-center justify-between gap-3 animate-in fade-in slide-in-from-bottom-2 duration-150">
@@ -234,14 +157,26 @@
     </div>
   {/if}
 
-  <!-- 3. Main Horizontal Thumb-Zone Strip with Horizontal Edge Fade Mask -->
+  <!-- 3. Main Horizontal Thumb-Zone Strip with Left/Right Arrow Navigation -->
   <div 
-    class="w-full max-w-3xl flex items-center justify-between px-2 sm:px-4 py-1.5 overflow-hidden relative"
-    style="mask-image: linear-gradient(to right, transparent, black 16px, black calc(100% - 16px), transparent); -webkit-mask-image: linear-gradient(to right, transparent, black 16px, black calc(100% - 16px), transparent);"
+    class="w-full max-w-3xl flex items-center justify-between px-1.5 sm:px-3 py-1.5 overflow-hidden relative gap-1"
   >
+    <!-- Left Scroll Arrow -->
+    <button
+      type="button"
+      onclick={() => scrollHorizontal(-130)}
+      class="flex-none p-1.5 rounded-xl bg-neutral-900/80 hover:bg-neutral-800 text-neutral-400 hover:text-white border border-white/5 active:scale-90 transition-all z-10 shadow-sm cursor-pointer"
+      title="Sola Kaydır"
+    >
+      <ChevronLeft size={16} />
+    </button>
+
     {#if selectedClip && editor.mobileWorkspace === 'timeline'}
       <!-- MODE A: CLIP SELECTED ACTIONS (Contextual Editing) -->
-      <div class="flex items-center gap-1 overflow-x-auto w-full px-2 py-0.5 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] touch-pan-x">
+      <div 
+        bind:this={scrollContainerRef}
+        class="flex-1 flex items-center gap-1 overflow-x-auto scroll-smooth w-full px-1 py-0.5 no-scrollbar [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] touch-pan-x"
+      >
         <!-- 1. Deselect button -->
         <button 
           onclick={() => { editor.selectClip(null); editor.triggerHaptic('light'); }}
@@ -264,17 +199,7 @@
           <span class="text-[10px] mt-1 font-medium">Böl</span>
         </button>
 
-        <!-- 3. Inspector Sheet Trigger -->
-        <button 
-          onclick={() => { editor.openBottomSheet('inspector'); editor.triggerHaptic('medium'); }}
-          class="flex flex-col items-center justify-center min-w-[58px] h-12 rounded-xl text-purple-300 hover:text-white hover:bg-purple-500/10 active:scale-95 transition-all flex-none"
-          title="Tüm Klip Detayları & Müfettiş"
-        >
-          <Sliders size={18} class="text-purple-400" />
-          <span class="text-[10px] mt-1 font-medium">Müfettiş</span>
-        </button>
-
-        <!-- 4. Speed control popover toggle -->
+        <!-- 3. Speed control popover toggle -->
         <button 
           onclick={() => { showSpeedPicker = !showSpeedPicker; showVolumeSlider = false; editor.triggerHaptic('light'); }}
           class="flex flex-col items-center justify-center min-w-[56px] h-12 rounded-xl transition-all active:scale-95 flex-none {showSpeedPicker ? 'bg-white/10 text-white' : 'text-neutral-200 hover:text-white hover:bg-white/5'}"
@@ -365,9 +290,9 @@
           <span class="text-[10px] mt-1 font-medium">Geçiş</span>
         </button>
 
-        <!-- 10. Filter Presets (Oklab LUT) -->
+        <!-- 9. Filter Presets (Oklab LUT) -->
         <button
-          onclick={() => { editor.openBottomSheet('filters'); editor.triggerHaptic('light'); }}
+          onclick={() => { editor.mobileWorkspace = 'filters'; editor.triggerHaptic('light'); }}
           class="flex flex-col items-center justify-center min-w-[56px] h-12 rounded-xl text-neutral-200 hover:text-white hover:bg-white/5 active:scale-95 transition-all flex-none"
           title="Renk Filtreleri & LUT"
         >
@@ -418,7 +343,10 @@
 
     {:else}
       <!-- MODE B: GLOBAL PRODUCTION DOCK (No Clip Selected) -->
-      <div class="flex items-center gap-1.5 overflow-x-auto w-full px-2 py-0.5 [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] touch-pan-x">
+      <div 
+        bind:this={scrollContainerRef}
+        class="flex-1 flex items-center gap-1.5 overflow-x-auto scroll-smooth w-full px-1 py-0.5 no-scrollbar [&::-webkit-scrollbar]:hidden [-ms-overflow-style:none] [scrollbar-width:none] touch-pan-x"
+      >
         <!-- 1. Kurgu / Timeline -->
         <button 
           onclick={() => { editor.mobileWorkspace = 'timeline'; editor.selectClip(null); editor.triggerHaptic('light'); }}
@@ -460,12 +388,15 @@
 
         <!-- 4. Sinematik Renk Filtreleri (Oklab LUT) -->
         <button 
-          onclick={() => { editor.openBottomSheet('filters'); editor.triggerHaptic('light'); }}
-          class="relative flex flex-col items-center justify-center min-w-[58px] h-12 rounded-xl transition-all active:scale-95 text-neutral-400 hover:text-white hover:bg-white/5 flex-none"
+          onclick={() => { editor.mobileWorkspace = 'filters'; editor.triggerHaptic('light'); }}
+          class="relative flex flex-col items-center justify-center min-w-[58px] h-12 rounded-xl transition-all active:scale-95 flex-none {editor.mobileWorkspace === 'filters' ? 'text-white bg-cyan-500/15 border border-cyan-500/25 font-bold' : 'text-neutral-400 hover:text-white hover:bg-white/5'}"
           title="Renk Filtreleri & LUT Kütüphanesi"
         >
           <Palette size={18} class="text-cyan-400" />
           <span class="text-[10px] mt-1 font-medium">Filtre</span>
+          {#if editor.mobileWorkspace === 'filters'}
+            <div class="absolute bottom-1 w-3 h-0.5 bg-cyan-400 rounded-full shadow-[0_0_6px_#22d3ee]"></div>
+          {/if}
         </button>
 
         <!-- 5. Altyazı & Metin -->
@@ -497,7 +428,7 @@
         <!-- 7. Ayarlar -->
         <button 
           onclick={() => { editor.isSettingsModalOpen = true; editor.triggerHaptic('light'); }}
-          class="relative flex flex-col items-center justify-center min-w-[56px] h-12 rounded-xl text-neutral-400 hover:text-white hover:bg-white/5 transition-all active:scale-95 ml-auto flex-none"
+          class="relative flex flex-col items-center justify-center min-w-[56px] h-12 rounded-xl text-neutral-400 hover:text-white hover:bg-white/5 transition-all active:scale-95 ml-auto flex-none cursor-pointer"
           title="Proje ve Donanım Ayarları"
         >
           <SlidersHorizontal size={18} class="text-emerald-400" />
@@ -505,5 +436,15 @@
         </button>
       </div>
     {/if}
+
+    <!-- Right Scroll Arrow -->
+    <button
+      type="button"
+      onclick={() => scrollHorizontal(130)}
+      class="flex-none p-1.5 rounded-xl bg-neutral-900/80 hover:bg-neutral-800 text-neutral-400 hover:text-white border border-white/5 active:scale-90 transition-all z-10 shadow-sm cursor-pointer"
+      title="Sağa Kaydır"
+    >
+      <ChevronRight size={16} />
+    </button>
   </div>
 </nav>

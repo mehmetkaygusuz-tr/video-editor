@@ -1,6 +1,9 @@
+export type TrackType = 'video' | 'subtitle' | 'effect' | 'audio';
+
 export interface TimelineTrack {
   id: string;
   name: string;
+  type?: TrackType;
   clips: TimelineClip[];
   isMuted?: boolean;
   isLocked?: boolean;
@@ -86,7 +89,7 @@ export interface TimelineClip {
   color: string;
   parentClipId?: string; // Connected clips: ID of parent storyline clip
   anchorOffset?: number; // Offset relative to parentClip startAt in seconds
-  type?: 'video' | 'audio' | 'image' | 'text';
+  type?: 'video' | 'audio' | 'image' | 'text' | 'effect';
   text?: string;
   subtitles?: SubtitleItem[];
   subtitleStyle?: Partial<SubtitleStyle>;
@@ -267,8 +270,17 @@ export type AgentActionType =
   | 'APPLY_TEMPLATE'
   | 'SET_ASPECT_RATIO'
   | 'OPEN_AI_CENTER'
+  | 'SET_VOLUME'
+  | 'TOGGLE_MUTE'
+  | 'DUPLICATE_CLIP'
+  | 'COPY_GRADE_TO_ALL'
+  | 'RESET_COLOR_GRADING'
+  | 'OPEN_TRANSITIONS'
+  | 'OPEN_EXPORT'
+  | 'RESET_PROJECT'
   | 'UNDO'
-  | 'REDO';
+  | 'REDO'
+  | 'UNKNOWN_INTENT';
 
 export interface AgentIntentResult {
   action: AgentActionType;
