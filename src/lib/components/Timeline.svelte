@@ -108,9 +108,11 @@
     clipId: string;
     mode: 'move' | 'trim-left' | 'trim-right';
     startX: number;
+    startY: number;
     initialStartAt: number;
     initialDuration: number;
     initialSourceOffset: number;
+    isThresholdMet: boolean;
   } | null = null;
   
   let radialMenuContext = $state<{ clipId: string, x: number, y: number } | null>(null);
@@ -154,6 +156,16 @@
     e.stopPropagation(); // Prevent panning
     editor.selectClip(clip.id);
     
+    // Tap-to-seek on clip: seek playhead immediately to tapped timestamp
+    if (mode === 'move' && container) {
+      const rect = container.getBoundingClientRect();
+      const mouseX = e.clientX - rect.left - effectiveHeaderWidth;
+      const clickTime = Math.max(0, (mouseX + editor.scrollX) / editor.zoom);
+      editor.seekTo(clickTime);
+      scheduleSettleSeek();
+      editor.renderFrameDirty = true;
+    }
+
     // Double tap detection on clip to quick-open bottom docked filters
     const now = performance.now();
     if (lastClipTapId === clip.id && (now - lastClipTapTime) < 300) {
@@ -172,19 +184,17 @@
     }
     
     // Trigger subtle mobile haptic feedback if supported
-    if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
-      try {
-        navigator.vibrate(10);
-      } catch (_) {}
-    }
+    editor.triggerHaptic('light');
 
     activeClipDrag = {
       clipId: clip.id,
       mode,
       startX: e.clientX,
+      startY: e.clientY,
       initialStartAt: clip.startAt,
       initialDuration: clip.duration,
-      initialSourceOffset: clip.sourceOffset
+      initialSourceOffset: clip.sourceOffset,
+      isThresholdMet: mode !== 'move'
     };
 
     // Auto-preview the clip frame when clicked/dragged
@@ -299,6 +309,34 @@
     }, 40);
   }
 
+  function handlePlayheadPointerDown(e: PointerEvent) {
+    e.stopPropagation();
+    if (!container) return;
+    container.setPointerCapture(e.pointerId);
+    activePointers.set(e.pointerId, e);
+    isDraggingPlayhead = true;
+    editor.isScrubbing = true;
+    isPanning = false;
+    activeClipDrag = null;
+    updatePlayhead(e.clientX);
+    scheduleSettleSeek();
+    editor.triggerHaptic('light');
+  }
+
+  function handleRulerPointerDown(e: PointerEvent) {
+    e.stopPropagation();
+    if (!container) return;
+    container.setPointerCapture(e.pointerId);
+    activePointers.set(e.pointerId, e);
+    isDraggingPlayhead = true;
+    editor.isScrubbing = true;
+    isPanning = false;
+    activeClipDrag = null;
+    updatePlayhead(e.clientX);
+    scheduleSettleSeek();
+    editor.triggerHaptic('light');
+  }
+
   function handlePointerMove(e: PointerEvent) {
     if (!activePointers.has(e.pointerId)) return;
     activePointers.set(e.pointerId, e);
@@ -307,6 +345,15 @@
     const lastEvent = events[events.length - 1];
 
     if (activeClipDrag) {
+      if (!activeClipDrag.isThresholdMet) {
+        const dist = Math.hypot(lastEvent.clientX - activeClipDrag.startX, lastEvent.clientY - activeClipDrag.startY);
+        if (dist > 6) {
+          activeClipDrag.isThresholdMet = true;
+        } else {
+          return; // Sub-threshold jitter: tap-to-seek without moving clip
+        }
+      }
+
       const dx = lastEvent.clientX - activeClipDrag.startX;
       let timeDelta = dx / editor.zoom;
       
@@ -522,7 +569,9 @@
     }
     
     if (activeClipDrag) {
-      editor.saveState();
+      if (activeClipDrag.isThresholdMet) {
+        editor.saveState();
+      }
       activeClipDrag = null;
       activeSnapGuide = null;
     }
@@ -965,10 +1014,12 @@
     <!-- Tracks Canvas (Scrollable) -->
     <div class="relative flex-1 h-full overflow-hidden bg-neutral-900/50">
       <!-- Adaptive NLE Ruler (Spatial Glass) -->
+      <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div 
-        class="absolute top-0 left-0 right-0 h-7 border-b border-white/10 spatial-glass-subtle z-10 select-none overflow-hidden"
+        class="absolute top-0 left-0 right-0 h-7 border-b border-white/10 spatial-glass-subtle z-20 select-none overflow-hidden cursor-pointer"
+        onpointerdown={handleRulerPointerDown}
       >
-        <div class="relative w-full h-full" style="transform: translate3d(-{editor.scrollX}px, 0, 0)">
+        <div class="relative w-full h-full pointer-events-none" style="transform: translate3d(-{editor.scrollX}px, 0, 0)">
           {#each rulerTicks as tick}
             {#if tick.isMajor}
               <div 
@@ -1089,20 +1140,43 @@
             </div>
           </div>
         {/if}
+      </div>
 
-        <!-- Playhead Line (Neon Laser 2026) -->
-        <div 
-          class="absolute top-0 bottom-0 w-[2px] bg-gradient-to-b from-rose-500 via-purple-500 to-indigo-500 shadow-[0_0_12px_rgba(244,63,94,0.85)] z-30 pointer-events-none origin-top"
-          style="transform: translate3d({editor.playhead * editor.zoom}px, 0, 0);"
-        >
-          <!-- Playhead Head in Ruler Area (Touch-Friendly Ruby Diamond Marker) -->
+      <!-- Independent Top-Level Playhead & Scrubber Overlay Layer (z-40) -->
+      <div class="absolute inset-0 pointer-events-none z-40 overflow-hidden">
+        <div class="relative w-full h-full pointer-events-none" style="transform: translate3d(-{editor.scrollX}px, 0, 0);">
+          <!-- 28px Touch Corridor with pointer-events-auto -->
+          <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div 
-            class="absolute -top-7 -left-3 w-6 h-7 flex flex-col items-center pointer-events-auto cursor-ew-resize active:scale-125 transition-transform"
+            class="absolute top-0 bottom-0 pointer-events-auto cursor-ew-resize select-none touch-none flex flex-col items-center group/playhead"
+            style="left: {editor.playhead * editor.zoom}px; transform: translateX(-50%); width: 28px;"
+            onpointerdown={handlePlayheadPointerDown}
+            role="slider"
+            tabindex="0"
+            aria-label="Oynatma Çizgisi"
+            aria-valuenow={editor.playhead}
+            aria-valuemin={0}
+            aria-valuemax={editor.duration}
+            onkeydown={(e) => {
+              if (e.key === 'ArrowLeft') {
+                e.preventDefault();
+                editor.stepFrame(e.shiftKey ? -5 : -1);
+              } else if (e.key === 'ArrowRight') {
+                e.preventDefault();
+                editor.stepFrame(e.shiftKey ? 5 : 1);
+              }
+            }}
           >
-            <div class="w-5 h-4 bg-gradient-to-b from-rose-500 to-rose-600 rounded-t-md shadow-[0_0_10px_rgba(244,63,94,0.9)] flex items-center justify-center border border-white/40">
-              <div class="w-1 h-2 bg-white rounded-full shadow-sm"></div>
+            <!-- Ruby Diamond Head Marker in Ruler Area (Height 28px) -->
+            <div class="w-full h-7 flex flex-col items-center justify-center pointer-events-auto group-active/playhead:scale-110 transition-transform">
+              <div class="w-5 h-4 bg-gradient-to-b from-rose-500 to-rose-600 rounded-t-md shadow-[0_0_12px_rgba(244,63,94,0.95)] flex items-center justify-center border border-white/50">
+                <div class="w-1 h-2 bg-white rounded-full shadow-sm"></div>
+              </div>
+              <div class="w-0 h-0 border-l-[10px] border-l-transparent border-r-[10px] border-r-transparent border-t-[8px] border-t-rose-600"></div>
             </div>
-            <div class="w-0 h-0 border-l-[10px] border-l-transparent border-r-[10px] border-r-transparent border-t-[8px] border-t-rose-600"></div>
+
+            <!-- Vertical Neon Laser Line across all tracks -->
+            <div class="w-[2px] flex-1 bg-gradient-to-b from-rose-500 via-purple-500 to-indigo-500 shadow-[0_0_12px_rgba(244,63,94,0.9)] pointer-events-none group-hover/playhead:w-[3px] group-hover/playhead:brightness-125 transition-all"></div>
           </div>
         </div>
       </div>
