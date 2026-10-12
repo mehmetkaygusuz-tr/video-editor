@@ -1,7 +1,5 @@
 /*
-  Strict-Transport-Security: max-age=63072000; includeSubDomains; preload
   X-Content-Type-Options: nosniff
-  Referrer-Policy: strict-origin-when-cross-origin
   Permissions-Policy: camera=(self), microphone=(self), geolocation=()
   Cross-Origin-Opener-Policy: same-origin
   Cross-Origin-Embedder-Policy: credentialless
@@ -11,8 +9,6 @@
 /*.wasm
   Content-Type: application/wasm
   Cross-Origin-Resource-Policy: cross-origin
-  Cache-Control: public, max-age=31536000, immutable
 
 /assets/*
   Cross-Origin-Resource-Policy: cross-origin
-  Cache-Control: public, max-age=31536000, immutable

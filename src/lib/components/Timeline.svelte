@@ -287,11 +287,7 @@
         lastPanY = e.clientY;
       } else if (x > effectiveHeaderWidth) {
         // Scrub playhead anywhere on timeline background, tracks or ruler
-        isDraggingPlayhead = true;
-        editor.isScrubbing = true;
-        isPanning = false;
-        updatePlayhead(e.clientX);
-        scheduleSettleSeek();
+        beginPlayheadScrub(e.clientX);
       }
     } else if (activePointers.size === 2) {
       // Pinch to zoom started
@@ -309,14 +305,29 @@
     }
   }
 
+  let wasPlayingBeforeScrub = false;
+
+  function beginPlayheadScrub(clientX: number) {
+    isDraggingPlayhead = true;
+    editor.isScrubbing = true;
+    isPanning = false;
+    activeClipDrag = null;
+    if (editor.isPlaying) {
+      wasPlayingBeforeScrub = true;
+      editor.isPlaying = false;
+      masterAudioClock.pause();
+    }
+    updatePlayhead(clientX);
+    scheduleSettleSeek();
+    editor.renderFrameDirty = true;
+  }
+
   let settleSeekTimer: any;
   function scheduleSettleSeek() {
     clearTimeout(settleSeekTimer);
     settleSeekTimer = setTimeout(() => {
-      if (!editor.isPlaying) {
-        editor.renderFrameDirty = true;
-        masterAudioClock.seek(editor.playhead, editor.tracks);
-      }
+      editor.renderFrameDirty = true;
+      masterAudioClock.seek(editor.playhead, editor.tracks);
     }, 40);
   }
 
@@ -325,12 +336,7 @@
     if (!container) return;
     container.setPointerCapture(e.pointerId);
     activePointers.set(e.pointerId, e);
-    isDraggingPlayhead = true;
-    editor.isScrubbing = true;
-    isPanning = false;
-    activeClipDrag = null;
-    updatePlayhead(e.clientX);
-    scheduleSettleSeek();
+    beginPlayheadScrub(e.clientX);
     editor.triggerHaptic('light');
   }
 
@@ -339,12 +345,7 @@
     if (!container) return;
     container.setPointerCapture(e.pointerId);
     activePointers.set(e.pointerId, e);
-    isDraggingPlayhead = true;
-    editor.isScrubbing = true;
-    isPanning = false;
-    activeClipDrag = null;
-    updatePlayhead(e.clientX);
-    scheduleSettleSeek();
+    beginPlayheadScrub(e.clientX);
     editor.triggerHaptic('light');
   }
 
@@ -590,6 +591,10 @@
         editor.isScrubbing = false;
         masterAudioClock.seek(editor.playhead, editor.tracks);
         editor.renderFrameDirty = true;
+        if (wasPlayingBeforeScrub) {
+          wasPlayingBeforeScrub = false;
+          editor.togglePlayback();
+        }
       }
       isDraggingPlayhead = false;
       isPanning = false;
@@ -1296,7 +1301,7 @@
     tabindex="0"
     aria-label="{clip.name}, Başlangıç: {clip.startAt.toFixed(2)}s, Süre: {clip.duration.toFixed(2)}s."
     aria-pressed={editor.selectedClipId === clip.id}
-    class="absolute top-1 bottom-1 rounded-xl shadow-lg border cursor-pointer select-none transition-all group/clip overflow-hidden backdrop-blur-md focus-visible:outline-none {editor.selectedClipId === clip.id ? 'ring-2 ring-purple-400 border-white shadow-[0_0_20px_rgba(168,85,247,0.45)] brightness-110 z-20' : 'border-white/10 hover:border-white/25 brightness-100'}"
+    class="absolute top-1 bottom-1 rounded-xl shadow-md border cursor-pointer select-none transition-[box-shadow,ring-color,border-color,filter] duration-150 group/clip overflow-hidden focus-visible:outline-none {editor.selectedClipId === clip.id ? 'ring-2 ring-purple-400 border-white shadow-[0_0_16px_rgba(168,85,247,0.45)] brightness-110 z-20' : 'border-white/10 hover:border-white/25 brightness-100'}"
     style="left: {clip.startAt * editor.zoom}px; width: {clip.duration * editor.zoom}px; background: {clip.type === 'audio' ? 'linear-gradient(135deg, rgba(6, 78, 59, 0.85) 0%, rgba(16, 185, 129, 0.5) 100%)' : clip.type === 'text' ? 'linear-gradient(135deg, rgba(120, 53, 15, 0.85) 0%, rgba(245, 158, 11, 0.5) 100%)' : 'linear-gradient(135deg, rgba(30, 58, 138, 0.85) 0%, rgba(37, 99, 235, 0.5) 100%)'};"
     onpointerdown={(e) => handleClipPointerDown(e, clip, 'move')}
     ondblclick={(e) => {

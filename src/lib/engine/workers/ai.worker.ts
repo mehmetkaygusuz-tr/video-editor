@@ -1,7 +1,4 @@
 import { pipeline, env, RawImage } from '@huggingface/transformers';
-import * as vad from '@ricky0123/vad-web';
-import { KokoroTTS } from 'kokoro-js';
-import { FilesetResolver, FaceDetector } from '@mediapipe/tasks-vision';
 
 env.allowLocalModels = false;
 if (env.backends?.onnx?.wasm) {
@@ -211,6 +208,7 @@ self.onmessage = async (e: MessageEvent) => {
       const speechSegments: { start: number; end: number }[] = [];
 
       try {
+        const vad = await import('@ricky0123/vad-web');
         const vadModelUrl = (self.location?.origin || '') + '/silero_vad_legacy.onnx';
         const myvad = await vad.NonRealTimeVAD.new({
           modelURL: vadModelUrl
@@ -320,6 +318,7 @@ self.onmessage = async (e: MessageEvent) => {
       }
 
       if (!kokoroTTS) {
+        const { KokoroTTS } = await import('kokoro-js');
         try {
           notifyLog('Kokoro-82M WebGPU modeli yükleniyor...');
           kokoroTTS = await KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX', {
@@ -488,6 +487,7 @@ self.onmessage = async (e: MessageEvent) => {
 
       if (!faceDetector) {
         try {
+          const { FilesetResolver, FaceDetector } = await import('@mediapipe/tasks-vision');
           const vision = await FilesetResolver.forVisionTasks(
             'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
           );

@@ -34,6 +34,8 @@
 
   let canvasRef = $state<HTMLCanvasElement | undefined>();
   let isAspectRatioDropdownOpen = $state(false);
+  let windowWidth = $state(typeof window !== 'undefined' ? window.innerWidth : 1200);
+  const isMobileScreen = $derived(windowWidth < 1024);
 
   let timelineHeightClass = $derived.by(() => {
     if (editor.isTimelineCollapsed) {
@@ -549,13 +551,14 @@
   }
 
   let lastRenderedPlayhead = -1;
+  let lastTelemetryUpdate = 0;
 
   function playLoop() {
     const now = performance.now();
     const dt = (now - lastTime) / 1000;
     lastTime = now;
     
-    if (editor.isPlaying) {
+    if (editor.isPlaying && !editor.isScrubbing) {
       const masterTime = masterAudioClock.getCurrentTime();
       editor.playhead = masterTime;
       if (editor.playhead >= editor.duration) {
@@ -571,15 +574,19 @@
 
       // Hardware latency-compensated video presentation time (Master Audio Clock)
       const videoPTS = masterAudioClock.getVideoPresentationTime(editor.playhead);
-      editor.updateAudioClockTelemetry(masterAudioClock.getTelemetry());
       seekAndRenderVideoFrame(videoPTS, true);
     } else {
-      // Render frame when paused only when playhead changed or frame is dirty (eliminates 60 FPS idle invalidations)
+      // Render frame when paused or scrubbing only when playhead changed or frame is dirty (eliminates 60 FPS idle invalidations)
       if (editor.renderFrameDirty || Math.abs(editor.playhead - lastRenderedPlayhead) > 0.0005) {
         lastRenderedPlayhead = editor.playhead;
-        editor.updateAudioClockTelemetry(masterAudioClock.getTelemetry());
         seekAndRenderVideoFrame(editor.playhead, false);
       }
+    }
+
+    // Throttle telemetry updates to 4 Hz (every 250ms) to avoid reactive churn at 60fps
+    if (now - lastTelemetryUpdate > 250) {
+      lastTelemetryUpdate = now;
+      editor.updateAudioClockTelemetry(masterAudioClock.getTelemetry());
     }
     
     playLoopId = requestAnimationFrame(playLoop);
@@ -704,7 +711,7 @@
   }
 </script>
 
-<svelte:window onkeydown={handleGlobalKeydown} />
+<svelte:window onkeydown={handleGlobalKeydown} bind:innerWidth={windowWidth} />
 
 <main class="w-screen h-[100dvh] spatial-bg text-neutral-200 flex flex-col font-sans overflow-hidden select-none lg:p-2.5 lg:gap-2.5" data-theme={editor.activeTheme}>
   <!-- 2026 Spatial Glass Studio Header & Dynamic Island -->
@@ -1335,26 +1342,18 @@
       class="transition-all duration-300 ease-in-out flex-none spatial-glass lg:rounded-2xl border-t lg:border border-white/10 relative z-10 overflow-hidden shadow-2xl {timelineHeightClass}"
     >
       <svelte:boundary>
-        {#if editor.mobileWorkspace === 'timeline'}
+        {#if !isMobileScreen || editor.mobileWorkspace === 'timeline'}
           <Timeline />
         {:else if editor.mobileWorkspace === 'filters'}
-          <div class="flex-1 lg:hidden overflow-hidden flex flex-col h-full w-full">
+          <div class="flex-1 overflow-hidden flex flex-col h-full w-full">
             <FiltersSheet isBottomDocked={true} onClose={() => { editor.mobileWorkspace = 'timeline'; }} />
           </div>
-          <!-- On desktop, always show timeline -->
-          <div class="hidden lg:flex flex-1 w-full h-full">
-            <Timeline />
-          </div>
         {:else}
-          <!-- Mobile workspace panel swapping logic (hidden on lg, takes timeline spot) -->
-          <div class="flex-1 lg:hidden spatial-glass overflow-hidden flex flex-col h-full w-full">
+          <!-- Mobile workspace panel swapping logic (only active on mobile) -->
+          <div class="flex-1 spatial-glass overflow-hidden flex flex-col h-full w-full">
             <div class="flex-1 min-h-0 overflow-y-auto custom-scrollbar">
               <StudioSidebar isMobileSheet={false} hideTabs={true} onClose={() => { editor.mobileWorkspace = 'timeline'; }} />
             </div>
-          </div>
-          <!-- On desktop, show timeline -->
-          <div class="hidden lg:flex flex-1 w-full h-full">
-            <Timeline />
           </div>
         {/if}
         {#snippet failed(error, reset)}
