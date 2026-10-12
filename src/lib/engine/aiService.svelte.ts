@@ -349,7 +349,7 @@ export class AIService {
   }
 
   // 1. Feature: Auto-Captions
-  async generateCaptionsForClip(clipId?: string) {
+  async generateCaptionsForClip(clipId?: string, options?: { language?: string }) {
     try {
       this.addLog('WebGPU Whisper-Tiny Motoru başlatılıyor...');
       
@@ -386,7 +386,7 @@ export class AIService {
 
       const res = await this.sendTask<{ text: string; subtitles: SubtitleItem[] }>(
         'TRANSCRIBE_AUDIO',
-        { audioData, sampleRate, isRealMedia },
+        { audioData, sampleRate, isRealMedia, language: options?.language },
         'whisper_captions',
         [audioData.buffer]
       );
@@ -437,7 +437,7 @@ export class AIService {
   }
 
   // 2. Feature: Silence Removal / Jump-Cut
-  async autoJumpCutSilence(clipId?: string) {
+  async autoJumpCutSilence(clipId?: string, options?: { sensitivity?: number }) {
     try {
       this.addLog('ONNX Silero VAD (Sessizlik Kesici) çalıştırılıyor...');
 
@@ -474,10 +474,16 @@ export class AIService {
 
       const sampleRate = 16000;
       const { audioData } = await this.extractAudioPcmFromClip(targetClip, sampleRate);
+      const sensitivity = options?.sensitivity ?? 0.5;
 
       const res = await this.sendTask<{ speechSegments: { start: number; end: number }[]; silenceSegments: any[] }>(
         'DETECT_SILENCE',
-        { audioData, sampleRate },
+        {
+          audioData,
+          sampleRate,
+          positiveSpeechThreshold: sensitivity,
+          negativeSpeechThreshold: Math.max(0.1, Number((sensitivity * 0.7).toFixed(2)))
+        },
         'silero_vad',
         [audioData.buffer]
       );
@@ -601,10 +607,10 @@ export class AIService {
   }
 
   // 3. Feature: AI Voiceover / Text-to-Speech
-  async generateSpeech(text: string, voice = 'af_bella') {
+  async generateSpeech(text: string, voice = 'af_bella', speed = 1.0) {
     try {
       if (!text.trim()) throw new Error('Seslendirilecek bir metin giriniz.');
-      this.addLog(`Kokoro-82M ONNX ile seslendiriliyor (${voice}): "${text.slice(0, 30)}..."`);
+      this.addLog(`Kokoro-82M ONNX ile seslendiriliyor (${voice}, ${speed}x): "${text.slice(0, 30)}..."`);
 
       const res = await this.sendTask<{
         text: string;
@@ -614,7 +620,7 @@ export class AIService {
         pcmData?: Float32Array;
       }>(
         'GENERATE_TTS',
-        { text, voice },
+        { text, voice, speed },
         'kokoro_tts'
       );
 

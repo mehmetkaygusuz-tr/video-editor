@@ -175,7 +175,7 @@
   }
 
   async function runSilenceCut() {
-    await aiService.autoJumpCutSilence();
+    await aiService.autoJumpCutSilence(undefined, { sensitivity: silenceSensitivity });
   }
 
   async function runTtsGeneration() {

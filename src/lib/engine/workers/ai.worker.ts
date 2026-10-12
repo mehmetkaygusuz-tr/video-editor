@@ -1,8 +1,34 @@
 import { pipeline, env, RawImage } from '@huggingface/transformers';
 
+// 1. Official Transformers.js & ONNX Runtime Configuration
 env.allowLocalModels = false;
+env.useBrowserCache = true;
+env.useWasmCache = true;
+
+// Configure ONNX WebAssembly environment for web worker execution
 if (env.backends?.onnx?.wasm) {
-  env.backends.onnx.wasm.proxy = false; // Inside web worker: execute directly, do not spawn nested proxy
+  env.backends.onnx.wasm.proxy = false; // Never spawn nested workers inside a web worker
+  const threadCount = typeof navigator !== 'undefined' && navigator.hardwareConcurrency
+    ? Math.min(Math.max(1, navigator.hardwareConcurrency), 4)
+    : 2;
+  env.backends.onnx.wasm.numThreads = threadCount;
+}
+
+/**
+ * Checks browser WebGPU availability and shader-f16 feature support
+ */
+async function checkWebGpuSupport(): Promise<{ supported: boolean; hasFp16: boolean }> {
+  try {
+    if (typeof navigator === 'undefined' || !('gpu' in navigator)) {
+      return { supported: false, hasFp16: false };
+    }
+    const adapter = await navigator.gpu.requestAdapter();
+    if (!adapter) return { supported: false, hasFp16: false };
+    const hasFp16 = adapter.features?.has('shader-f16') ?? false;
+    return { supported: true, hasFp16 };
+  } catch {
+    return { supported: false, hasFp16: false };
+  }
 }
 
 function notifyProgress(taskId: string, feature: string, progress: number, message: string) {
@@ -20,13 +46,22 @@ function notifyLog(message: string, level: 'info' | 'warn' | 'error' = 'info') {
   });
 }
 
-function sendResult(taskId: string, result: any) {
-  self.postMessage({
-    type: 'ai_result',
-    taskId,
-    result,
-    payload: { taskId, result }
-  });
+function sendResult(taskId: string, result: any, transfer?: Transferable[]) {
+  if (transfer && transfer.length > 0) {
+    (self as any).postMessage({
+      type: 'ai_result',
+      taskId,
+      result,
+      payload: { taskId, result }
+    }, transfer);
+  } else {
+    self.postMessage({
+      type: 'ai_result',
+      taskId,
+      result,
+      payload: { taskId, result }
+    });
+  }
 }
 
 function sendError(taskId: string, error: any) {
@@ -39,10 +74,12 @@ function sendError(taskId: string, error: any) {
   });
 }
 
+// Module-level cached AI model instances to prevent repeated initialization overhead
 let transcriber: any = null;
 let segmenter: any = null;
 let kokoroTTS: any = null;
 let faceDetector: any = null;
+let vadInstance: any = null;
 const loadedModelsList = new Set<string>();
 
 self.onmessage = async (e: MessageEvent) => {
@@ -51,26 +88,38 @@ self.onmessage = async (e: MessageEvent) => {
   try {
     if (type === 'TRANSCRIBE_AUDIO') {
       notifyLog(`Görev ${taskId} başlatıldı: Whisper Altyazı Transkripsiyonu`);
-      notifyProgress(taskId, 'whisper_captions', 10, 'Whisper konuşma tanıma modeli yükleniyor...');
+      notifyProgress(taskId, 'whisper_captions', 10, 'Whisper konuşma tanıma modeli hazırlanıyor...');
 
       if (!transcriber) {
-        try {
-          // Transformers.js v3 resmi WebGPU modeli
-          transcriber = await pipeline('automatic-speech-recognition', 'onnx-community/whisper-tiny', {
-            device: 'webgpu',
-            dtype: 'fp32',
-            progress_callback: (p: any) => {
-              if (p?.status === 'progress' && typeof p.progress === 'number') {
-                notifyProgress(taskId, 'whisper_captions', 10 + Math.round(p.progress * 0.25), `Whisper modeli indiriliyor: %${Math.round(p.progress)}`);
-              }
-            }
-          });
-          loadedModelsList.add('onnx-community/whisper-tiny [WebGPU]');
-          notifyLog('WebGPU Whisper başarıyla yüklendi ve hazır.');
-        } catch (err: any) {
-          notifyLog('WebGPU başlatılamadı, WASM CPU moduna geçiliyor...', 'warn');
+        const gpuInfo = await checkWebGpuSupport();
+
+        if (gpuInfo.supported) {
           try {
-            transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny', {
+            notifyLog(`WebGPU algılandı (${gpuInfo.hasFp16 ? 'fp16 destekli' : 'fp32'}). Whisper-Tiny WebGPU yükleniyor...`);
+            // Transformers.js v3/v4 official WebGPU pipeline configuration:
+            // Full precision/fp16 for encoder and INT4 (q4) for decoder for optimal accuracy and lowest latency
+            transcriber = await pipeline('automatic-speech-recognition', 'onnx-community/whisper-tiny', {
+              device: 'webgpu',
+              dtype: {
+                encoder_model: gpuInfo.hasFp16 ? 'fp16' : 'fp32',
+                decoder_model_merged: 'q4'
+              },
+              progress_callback: (p: any) => {
+                if (p?.status === 'progress' && typeof p.progress === 'number') {
+                  notifyProgress(taskId, 'whisper_captions', 10 + Math.round(p.progress * 0.25), `Whisper modeli indiriliyor: %${Math.round(p.progress)}`);
+                }
+              }
+            });
+            loadedModelsList.add('onnx-community/whisper-tiny [WebGPU]');
+            notifyLog('WebGPU Whisper başarıyla yüklendi ve hazır.');
+          } catch (err: any) {
+            notifyLog(`WebGPU Whisper başlatılamadı (${err?.message || err}), WASM moduna geçiliyor...`, 'warn');
+          }
+        }
+
+        if (!transcriber) {
+          try {
+            transcriber = await pipeline('automatic-speech-recognition', 'onnx-community/whisper-tiny', {
               device: 'wasm',
               dtype: 'q8',
               progress_callback: (p: any) => {
@@ -79,7 +128,7 @@ self.onmessage = async (e: MessageEvent) => {
                 }
               }
             });
-            loadedModelsList.add('Xenova/whisper-tiny [WASM]');
+            loadedModelsList.add('onnx-community/whisper-tiny [WASM]');
             notifyLog('WASM Whisper başarıyla yüklendi.', 'info');
           } catch (fallbackErr: any) {
             notifyLog(`Model yüklenemedi: ${fallbackErr.message}`, 'error');
@@ -90,7 +139,7 @@ self.onmessage = async (e: MessageEvent) => {
 
       notifyProgress(taskId, 'whisper_captions', 40, 'Ses analizi ve konuşma çözümleniyor...');
 
-      const { audioData, sampleRate } = payload;
+      const { audioData, language } = payload;
       let resultText = '';
       let subtitles: Array<{ id: string; text: string; start: number; end: number; words?: any[] }> = [];
 
@@ -100,32 +149,32 @@ self.onmessage = async (e: MessageEvent) => {
 
       if (audioData && audioData.length > 0) {
         try {
-          // transformers.js Float32Array 16kHz ses bekler (W3C standardı)
-          const result = await transcriber(audioData, {
+          const inputAudio = audioData instanceof Float32Array ? audioData : new Float32Array(audioData);
+          const transcribeOptions: any = {
             chunk_length_s: 30,
             stride_length_s: 5,
             return_timestamps: 'word',
             task: 'transcribe'
-          });
+          };
+          if (language) {
+            transcribeOptions.language = language;
+          }
 
+          const result = await transcriber(inputAudio, transcribeOptions);
           resultText = typeof result?.text === 'string' ? result.text.trim() : '';
 
           if (Array.isArray(result?.chunks) && result.chunks.length > 0) {
-            // Check if chunks are raw word tokens or phrase chunks
             const rawTokens = result.chunks.filter((c: any) => c.text && c.text.trim().length > 0);
-            
-            // Check if tokens are individual words (average <= 2 words per chunk)
             const isWordLevel = rawTokens.length > 0 && (rawTokens[0].text.trim().split(/\s+/).length <= 2);
 
             if (isWordLevel) {
-              // Group individual words into readable subtitle blocks (3-7 words or ~2.5s duration)
               let currentWords: Array<{ word: string; start: number; end: number }> = [];
               let blockStart = 0;
               let blockIndex = 0;
 
               for (let i = 0; i < rawTokens.length; i++) {
                 const token = rawTokens[i];
-                const start = Array.isArray(token.timestamp) ? (token.timestamp[0] ?? 0) : 0;
+                const start = Array.isArray(token.timestamp) ? (token.timestamp[0] ?? 0) : (typeof token.timestamp === 'number' ? token.timestamp : 0);
                 const end = Array.isArray(token.timestamp) ? (token.timestamp[1] ?? (start + 0.4)) : (start + 0.4);
                 const wText = token.text.trim();
 
@@ -142,7 +191,6 @@ self.onmessage = async (e: MessageEvent) => {
                 const blockDur = end - blockStart;
                 const endsWithPunct = /[.!?]$/.test(wText);
 
-                // Group boundary reached
                 if (currentWords.length >= 6 || blockDur >= 2.8 || endsWithPunct || i === rawTokens.length - 1) {
                   const blockEnd = Math.max(blockStart + 0.5, Number(end.toFixed(2)));
                   const phraseText = currentWords.map(w => w.word).join(' ');
@@ -158,9 +206,8 @@ self.onmessage = async (e: MessageEvent) => {
                 }
               }
             } else {
-              // Phrase chunks directly from model
               subtitles = rawTokens.map((chunk: any, i: number) => {
-                const start = Array.isArray(chunk.timestamp) ? chunk.timestamp[0] ?? 0 : 0;
+                const start = Array.isArray(chunk.timestamp) ? chunk.timestamp[0] ?? 0 : (typeof chunk.timestamp === 'number' ? chunk.timestamp : 0);
                 const end = Array.isArray(chunk.timestamp) ? chunk.timestamp[1] ?? (start + 2.5) : start + 2.5;
                 const chunkStart = Math.max(0, Number(start.toFixed(2)));
                 const chunkEnd = Math.max(chunkStart + 0.3, Number(end.toFixed(2)));
@@ -204,24 +251,52 @@ self.onmessage = async (e: MessageEvent) => {
       notifyLog(`Görev ${taskId} başlatıldı: Sessizlik Tespiti (VAD)`);
       notifyProgress(taskId, 'silero_vad', 20, 'Ses dalga formu inceleniyor...');
 
-      const { audioData, sampleRate = 16000 } = payload;
+      const {
+        audioData,
+        sampleRate = 16000,
+        positiveSpeechThreshold = 0.5,
+        negativeSpeechThreshold = 0.35,
+        minSpeechMs = 100,
+        redemptionMs = 200
+      } = payload;
       const speechSegments: { start: number; end: number }[] = [];
+      const inputAudio = audioData instanceof Float32Array ? audioData : new Float32Array(audioData || []);
 
       try {
-        const vad = await import('@ricky0123/vad-web');
-        const vadModelUrl = (self.location?.origin || '') + '/silero_vad_legacy.onnx';
-        const myvad = await vad.NonRealTimeVAD.new({
-          modelURL: vadModelUrl
-        });
-        loadedModelsList.add('Silero VAD (ONNX)');
-        notifyLog('Silero VAD modeli hazır, konuşma alanları taranıyor...');
+        if (!vadInstance) {
+          const vad = await import('@ricky0123/vad-web');
+          const origin = typeof self !== 'undefined' && self.location?.origin && self.location.origin !== 'null'
+            ? self.location.origin
+            : '';
+          const vadModelUrl = origin
+            ? `${origin}/silero_vad_legacy.onnx`
+            : new URL('/silero_vad_legacy.onnx', self.location.href).href;
+
+          vadInstance = await vad.NonRealTimeVAD.new({
+            modelURL: vadModelUrl,
+            positiveSpeechThreshold,
+            negativeSpeechThreshold,
+            minSpeechMs,
+            redemptionMs,
+            ortConfig: (ort: any) => {
+              if (ort.env?.wasm) {
+                ort.env.wasm.proxy = false;
+                ort.env.wasm.numThreads = typeof navigator !== 'undefined' && navigator.hardwareConcurrency
+                  ? Math.min(Math.max(1, navigator.hardwareConcurrency), 4)
+                  : 2;
+              }
+            }
+          });
+          loadedModelsList.add('Silero VAD (ONNX)');
+          notifyLog('Silero VAD modeli hazırlandı, konuşma alanları taranıyor...');
+        }
 
         const CHUNK_SECONDS = 30;
         const chunkSize = sampleRate * CHUNK_SECONDS;
 
-        for (let i = 0; i < audioData.length; i += chunkSize) {
-          const chunk = audioData.slice(i, Math.min(i + chunkSize, audioData.length));
-          for await (const { start, end } of myvad.run(chunk, sampleRate)) {
+        for (let i = 0; i < inputAudio.length; i += chunkSize) {
+          const chunk = inputAudio.slice(i, Math.min(i + chunkSize, inputAudio.length));
+          for await (const { start, end } of vadInstance.run(chunk, sampleRate)) {
             const globalStart = (start / sampleRate) + (i / sampleRate);
             const globalEnd = (end / sampleRate) + (i / sampleRate);
             speechSegments.push({
@@ -230,13 +305,13 @@ self.onmessage = async (e: MessageEvent) => {
             });
           }
           await new Promise(r => setTimeout(r, 5));
-          notifyProgress(taskId, 'silero_vad', 20 + Math.floor((i / audioData.length) * 70), 'Ses taranıyor...');
+          notifyProgress(taskId, 'silero_vad', 20 + Math.floor((i / inputAudio.length) * 70), 'Ses taranıyor...');
         }
-      } catch {
+      } catch (vadErr: any) {
+        notifyLog(`Silero VAD inferans uyarısı (${vadErr?.message || vadErr}), DSP RMS enerji filtrelemesi uygulanıyor...`, 'warn');
         // W3C Web Audio RMS Energy analizi (Sıfır ek gecikme, garantili sonuç)
-        notifyLog('Yerel yüksek hassasiyetli RMS enerji filtrelemesi yapılıyor...', 'info');
         const frameSize = Math.floor(sampleRate * 0.05); // 50ms kareler
-        const numFrames = Math.floor(audioData.length / frameSize);
+        const numFrames = Math.floor(inputAudio.length / frameSize);
         const rmsValues = new Float32Array(numFrames);
         let totalRms = 0;
 
@@ -244,7 +319,7 @@ self.onmessage = async (e: MessageEvent) => {
           const offset = i * frameSize;
           let sum = 0;
           for (let j = 0; j < frameSize; j++) {
-            const s = audioData[offset + j];
+            const s = inputAudio[offset + j];
             sum += s * s;
           }
           const rms = Math.sqrt(sum / frameSize);
@@ -253,7 +328,8 @@ self.onmessage = async (e: MessageEvent) => {
         }
 
         const avgRms = totalRms / (numFrames || 1);
-        const threshold = Math.max(0.012, avgRms * 0.35);
+        const thresholdMultiplier = positiveSpeechThreshold ? (positiveSpeechThreshold * 0.7) : 0.35;
+        const threshold = Math.max(0.012, avgRms * thresholdMultiplier);
 
         let inSpeech = false;
         let segStart = 0;
@@ -265,7 +341,7 @@ self.onmessage = async (e: MessageEvent) => {
           } else if (!isSpeech && inSpeech) {
             inSpeech = false;
             const segEnd = i * 0.05;
-            if (segEnd - segStart >= 0.2) {
+            if (segEnd - segStart >= (minSpeechMs / 1000)) {
               speechSegments.push({
                 start: Number(segStart.toFixed(3)),
                 end: Number(segEnd.toFixed(3))
@@ -283,7 +359,7 @@ self.onmessage = async (e: MessageEvent) => {
 
       const silenceSegments: { start: number; end: number }[] = [];
       let lastEnd = 0;
-      const totalDuration = audioData.length / sampleRate;
+      const totalDuration = inputAudio.length / sampleRate;
 
       for (const seg of speechSegments) {
         if (seg.start > lastEnd + 0.15) {
@@ -309,7 +385,7 @@ self.onmessage = async (e: MessageEvent) => {
 
     } else if (type === 'GENERATE_TTS') {
       notifyLog(`Görev ${taskId} başlatıldı: Kokoro-82M ONNX Yapay Zeka Ses Sentezleme (TTS)`);
-      notifyProgress(taskId, 'kokoro_tts', 15, 'Kokoro-82M ONNX yapay zeka ses modeli hazırlanıyor...');
+      notifyProgress(taskId, 'kokoro_tts', 15, 'Kokoro-82M ONNX ses modeli hazırlanıyor...');
 
       const { text = '', voice = 'af_bella', speed = 1.0 } = payload;
       const cleanText = text.trim();
@@ -319,21 +395,28 @@ self.onmessage = async (e: MessageEvent) => {
 
       if (!kokoroTTS) {
         const { KokoroTTS } = await import('kokoro-js');
-        try {
-          notifyLog('Kokoro-82M WebGPU modeli yükleniyor...');
-          kokoroTTS = await KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX', {
-            dtype: 'fp32',
-            device: 'webgpu',
-            progress_callback: (p: any) => {
-              if (p?.status === 'progress' && typeof p.progress === 'number') {
-                notifyProgress(taskId, 'kokoro_tts', 15 + Math.round(p.progress * 0.45), `Model indiriliyor: %${Math.round(p.progress)}`);
+        const gpuInfo = await checkWebGpuSupport();
+
+        if (gpuInfo.supported) {
+          try {
+            notifyLog(`WebGPU algılandı (${gpuInfo.hasFp16 ? 'fp16' : 'fp32'}). Kokoro-82M WebGPU modeli yükleniyor...`);
+            kokoroTTS = await KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX', {
+              dtype: gpuInfo.hasFp16 ? 'fp16' : 'fp32',
+              device: 'webgpu',
+              progress_callback: (p: any) => {
+                if (p?.status === 'progress' && typeof p.progress === 'number') {
+                  notifyProgress(taskId, 'kokoro_tts', 15 + Math.round(p.progress * 0.45), `Model indiriliyor: %${Math.round(p.progress)}`);
+                }
               }
-            }
-          });
-          loadedModelsList.add('Kokoro-82M-v1.0 [WebGPU]');
-          notifyLog('Kokoro-82M modeli WebGPU üzerinde başarıyla yüklendi.');
-        } catch (gpuErr: any) {
-          notifyLog(`Kokoro WebGPU başlatılamadı (${gpuErr?.message || gpuErr}), WASM q8 moduna geçiliyor...`, 'warn');
+            });
+            loadedModelsList.add('Kokoro-82M-v1.0 [WebGPU]');
+            notifyLog('Kokoro-82M modeli WebGPU üzerinde başarıyla yüklendi.');
+          } catch (gpuErr: any) {
+            notifyLog(`Kokoro WebGPU başlatılamadı (${gpuErr?.message || gpuErr}), WASM q8 moduna geçiliyor...`, 'warn');
+          }
+        }
+
+        if (!kokoroTTS) {
           try {
             kokoroTTS = await KokoroTTS.from_pretrained('onnx-community/Kokoro-82M-v1.0-ONNX', {
               dtype: 'q8',
@@ -366,19 +449,20 @@ self.onmessage = async (e: MessageEvent) => {
       const durationSec = Number((pcmData.length / sampleRate).toFixed(2));
 
       notifyProgress(taskId, 'kokoro_tts', 100, 'Ses sentezi tamamlandı!');
+      // Zero-copy ArrayBuffer transfer for maximum throughput
       sendResult(taskId, {
         text: cleanText,
         voice,
         duration: durationSec,
         sampleRate,
         pcmData
-      });
+      }, [pcmData.buffer]);
 
     } else if (type === 'REMOVE_BACKGROUND') {
       notifyLog(`Görev ${taskId} başlatıldı: Arka Plan Ayrıştırma (Segmentation)`);
       notifyProgress(taskId, 'modnet_bg', 10, 'Görsel yükleniyor...');
       
-      const { image } = payload; // Can be a URL, data URL, or Blob URL
+      const { image } = payload;
       
       try {
         if (!image || image === 'dummy_frame') {
@@ -386,20 +470,28 @@ self.onmessage = async (e: MessageEvent) => {
         }
 
         if (!segmenter) {
+          const gpuInfo = await checkWebGpuSupport();
           notifyProgress(taskId, 'modnet_bg', 20, 'Segmentasyon modeli hazırlanıyor (briaai/RMBG-1.4)...');
-          try {
-            segmenter = await pipeline('image-segmentation', 'briaai/RMBG-1.4', {
-              device: 'webgpu',
-              progress_callback: (p: any) => {
-                if (p?.status === 'progress' && typeof p.progress === 'number') {
-                  notifyProgress(taskId, 'modnet_bg', 20 + Math.round(p.progress * 0.25), `Segmentasyon modeli indiriliyor: %${Math.round(p.progress)}`);
+
+          if (gpuInfo.supported) {
+            try {
+              segmenter = await pipeline('image-segmentation', 'briaai/RMBG-1.4', {
+                device: 'webgpu',
+                dtype: gpuInfo.hasFp16 ? 'fp16' : 'fp32',
+                progress_callback: (p: any) => {
+                  if (p?.status === 'progress' && typeof p.progress === 'number') {
+                    notifyProgress(taskId, 'modnet_bg', 20 + Math.round(p.progress * 0.25), `Segmentasyon modeli indiriliyor: %${Math.round(p.progress)}`);
+                  }
                 }
-              }
-            });
-            loadedModelsList.add('briaai/RMBG-1.4 [WebGPU]');
-            notifyLog('Segmentasyon modeli başarıyla WebGPU üzerine yüklendi.');
-          } catch (gpuErr: any) {
-            notifyLog(`WebGPU segmentasyon başlatılamadı (${gpuErr?.message || gpuErr}), WASM moduna geçiliyor...`, 'warn');
+              });
+              loadedModelsList.add('briaai/RMBG-1.4 [WebGPU]');
+              notifyLog('Segmentasyon modeli başarıyla WebGPU üzerine yüklendi.');
+            } catch (gpuErr: any) {
+              notifyLog(`WebGPU segmentasyon başlatılamadı (${gpuErr?.message || gpuErr}), WASM moduna geçiliyor...`, 'warn');
+            }
+          }
+
+          if (!segmenter) {
             try {
               segmenter = await pipeline('image-segmentation', 'briaai/RMBG-1.4', {
                 device: 'wasm',
@@ -423,8 +515,8 @@ self.onmessage = async (e: MessageEvent) => {
 
         notifyProgress(taskId, 'modnet_bg', 50, 'Görsel piksel segmentasyonu uygulanıyor...');
         
-        // Read the image using RawImage
-        const rawImage = await RawImage.fromURL(image);
+        // Read the image using official RawImage.read method
+        const rawImage = await RawImage.read(image);
         
         // Run inference
         const result = await segmenter(rawImage);
@@ -488,26 +580,41 @@ self.onmessage = async (e: MessageEvent) => {
       if (!faceDetector) {
         try {
           const { FilesetResolver, FaceDetector } = await import('@mediapipe/tasks-vision');
-          const vision = await FilesetResolver.forVisionTasks(
-            'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@0.10.14/wasm'
-          );
+          let vision: any;
+          try {
+            vision = await FilesetResolver.forVisionTasks(
+              'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@1.1.0/wasm'
+            );
+          } catch {
+            vision = await FilesetResolver.forVisionTasks(
+              'https://cdn.jsdelivr.net/npm/@mediapipe/tasks-vision@latest/wasm'
+            );
+          }
+
+          const modelAssetPath = 'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/latest/blaze_face_short_range.tflite';
+
           try {
             faceDetector = await FaceDetector.createFromOptions(vision, {
               baseOptions: {
-                modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/latest/blaze_face_short_range.tflite',
+                modelAssetPath,
                 delegate: 'GPU'
               },
-              runningMode: 'IMAGE'
+              runningMode: 'IMAGE',
+              minDetectionConfidence: 0.5,
+              minSuppressionThreshold: 0.3
             });
             loadedModelsList.add('MediaPipe BlazeFace [GPU]');
             notifyLog('MediaPipe BlazeFace GPU hızlandırmasıyla yüklendi.');
-          } catch {
+          } catch (gpuErr: any) {
+            notifyLog(`MediaPipe GPU başlatılamadı (${gpuErr?.message || gpuErr}), CPU moduna geçiliyor...`, 'warn');
             faceDetector = await FaceDetector.createFromOptions(vision, {
               baseOptions: {
-                modelAssetPath: 'https://storage.googleapis.com/mediapipe-models/face_detector/blaze_face_short_range/float16/latest/blaze_face_short_range.tflite',
+                modelAssetPath,
                 delegate: 'CPU'
               },
-              runningMode: 'IMAGE'
+              runningMode: 'IMAGE',
+              minDetectionConfidence: 0.5,
+              minSuppressionThreshold: 0.3
             });
             loadedModelsList.add('MediaPipe BlazeFace [CPU]');
             notifyLog('MediaPipe BlazeFace CPU modunda yüklendi.');
@@ -528,10 +635,11 @@ self.onmessage = async (e: MessageEvent) => {
           let detectedX = smoothedCenterX;
 
           if (faceDetector && frame.image) {
+            let bitmap: ImageBitmap | null = null;
             try {
               const resp = await fetch(frame.image);
               const blob = await resp.blob();
-              const bitmap = await createImageBitmap(blob);
+              bitmap = await createImageBitmap(blob);
               const detections = faceDetector.detect(bitmap);
 
               if (detections && detections.detections && detections.detections.length > 0) {
@@ -542,9 +650,13 @@ self.onmessage = async (e: MessageEvent) => {
                   detectedX = Math.max(0.16, Math.min(0.84, faceCenter));
                 }
               }
-              bitmap.close();
             } catch (frameErr: any) {
               notifyLog(`Kare analiz atlaması: ${frameErr?.message || frameErr}`, 'warn');
+            } finally {
+              // Always close ImageBitmap to prevent GPU memory leaks
+              if (bitmap && typeof bitmap.close === 'function') {
+                try { bitmap.close(); } catch {}
+              }
             }
           }
 
@@ -645,6 +757,10 @@ self.onmessage = async (e: MessageEvent) => {
       transcriber = null;
       segmenter = null;
       kokoroTTS = null;
+      if (vadInstance && typeof vadInstance.release === 'function') {
+        try { await vadInstance.release(); } catch {}
+      }
+      vadInstance = null;
       if (faceDetector && typeof faceDetector.close === 'function') {
         try { faceDetector.close(); } catch {}
       }
