@@ -92,7 +92,7 @@ export default {
 
     // [KRİTİK]: ONNX WebAssembly SIMD Threading ve SharedArrayBuffer için COOP & COEP
     newHeaders.set('Cross-Origin-Opener-Policy', 'same-origin');
-    newHeaders.set('Cross-Origin-Embedder-Policy', 'require-corp');
+    newHeaders.set('Cross-Origin-Embedder-Policy', 'credentialless');
     newHeaders.set('Cross-Origin-Resource-Policy', 'cross-origin');
 
     // Güvenlik Başlıkları

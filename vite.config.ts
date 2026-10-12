@@ -4,11 +4,74 @@ import tailwindcss from '@tailwindcss/vite';
 import fs from 'node:fs';
 import path from 'node:path';
 
+/**
+ * Cloudflare Pages 25 MiB Asset Sınırı & Modern WebAssembly Optimizasyon Eklentisi
+ * 
+ * 1. generateBundle:
+ *    Vite/Rollup derleme anında oluşturulan dosya ağacını (bundle) tarar.
+ *    Modern WebGPU ve JSEP mimarisinde asla gerekmeyen, ancak pakette eski fallback olarak
+ *    bulunan 25.6 MB'lık `ort-wasm-simd-threaded.asyncify.wasm` dosyasını çıktı listesinden düşürür.
+ *    Böylece dosya diske hiç yazılmaz, I/O yükü oluşmaz ve Cloudflare Pages 25 MiB sınırına takılmaz.
+ * 
+ * 2. closeBundle (Defense-in-Depth):
+ *    Derleme tamamlandıktan sonra dist/assets dizinini tarar.
+ *    Eğer herhangi bir sebeple diske yazılmış asyncify dosyası kalmışsa temizler ve telemetry logu basar.
+ */
+function cloudflarePagesAssetGuard(): Plugin {
+  const MAX_CLOUDFLARE_PAGES_BYTES = 25 * 1024 * 1024; // 25 MiB = 26,214,400 bytes
+
+  return {
+    name: 'cloudflare-pages-asset-guard',
+    enforce: 'post',
+    generateBundle(_, bundle) {
+      for (const fileName in bundle) {
+        const item = bundle[fileName];
+        // 1. Asyncify içeren eski WASM fallback dosyasını derleme çıktısından temizle
+        if (fileName.includes('asyncify') && fileName.endsWith('.wasm')) {
+          delete bundle[fileName];
+          console.log(`\n🛡️  [Cloudflare Pages Guard] Pruned obsolete asyncify WASM bundle: ${fileName}`);
+          continue;
+        }
+
+        // 2. 25 MiB aşımı güvenlik kontrolü (Asset boyutu denetimi)
+        if (item.type === 'asset') {
+          const size = typeof item.source === 'string' 
+            ? Buffer.byteLength(item.source) 
+            : item.source.length;
+          
+          if (size > MAX_CLOUDFLARE_PAGES_BYTES) {
+            console.warn(`\n⚠️  [Cloudflare Pages Guard] Warning: ${fileName} (${(size / (1024 * 1024)).toFixed(2)} MiB) exceeds 25 MiB limit!`);
+          }
+        }
+      }
+    },
+    closeBundle() {
+      // Diske yazılmış olası kalıntıları temizle (Defense-in-depth)
+      const distAssetsDir = path.resolve(process.cwd(), 'dist/assets');
+      if (fs.existsSync(distAssetsDir)) {
+        const files = fs.readdirSync(distAssetsDir);
+        for (const file of files) {
+          if (file.includes('asyncify') && file.endsWith('.wasm')) {
+            const filePath = path.join(distAssetsDir, file);
+            try {
+              fs.unlinkSync(filePath);
+              console.log(`🛡️  [Cloudflare Pages Guard] Cleaned up legacy disk asset: ${file}`);
+            } catch (err) {
+              console.warn(`[Cloudflare Pages Guard] Could not unlink ${file}:`, err);
+            }
+          }
+        }
+      }
+    }
+  };
+}
+
 // https://vitejs.dev/config/
 export default defineConfig({
   plugins: [
     tailwindcss(),
-    svelte()
+    svelte(),
+    cloudflarePagesAssetGuard()
   ],
   server: {
     port: 3000,
