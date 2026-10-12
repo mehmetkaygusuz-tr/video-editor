@@ -771,9 +771,9 @@
     if (editor.tracks.length === 0) {
       if (asset.type === 'video') {
         const vTrack = editor.addTrack('V1', 'video');
-        editor.addClip(vTrack.id, asset.name, dropTime, asset.duration || 10, asset.color, asset.id, { type: 'video' });
+        const vClip = editor.addClip(vTrack.id, asset.name, dropTime, asset.duration || 10, asset.color, asset.id, { type: 'video' });
         const aTrack = editor.addTrack('A1', 'audio');
-        editor.addClip(aTrack.id, `${asset.name} (Ses)`, dropTime, asset.duration || 10, '#10b981', asset.id, { type: 'audio' });
+        editor.addClip(aTrack.id, `${asset.name} (Ses)`, dropTime, asset.duration || 10, '#10b981', asset.id, { type: 'audio', parentClipId: vClip?.id });
         triggerPreview(asset.id);
       } else if (asset.type === 'audio') {
         const aTrack = editor.addTrack('A1', 'audio');

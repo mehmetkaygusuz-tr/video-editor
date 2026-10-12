@@ -729,7 +729,6 @@
           <img src="logo-icon.png" alt="Logo" class="h-8 w-8 sm:h-9 sm:w-9 object-contain rounded-xl p-0.5 bg-neutral-900/90 border border-white/15 shadow-[0_0_16px_rgba(139,92,246,0.35)] transition-transform group-hover:scale-105" />
           <div class="absolute -bottom-0.5 -right-0.5 w-2.5 h-2.5 bg-emerald-400 border-2 border-neutral-900 rounded-full shadow-[0_0_8px_#34d399]"></div>
         </button>
-        <span class="hidden sm:inline-flex text-[9px] font-mono px-1.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300 border border-purple-500/30 font-bold uppercase tracking-wider mb-0.5 leading-none">2026 PRO</span>
       </div>
 
       <!-- Quick Action: Project Reset -->
@@ -898,164 +897,7 @@
     <div class="flex-1 flex min-h-0 overflow-hidden lg:gap-2">
       
       <!-- Center Pane: Professional Reference Cinema Monitor Stage -->
-      <section class="flex-1 relative flex flex-col items-center justify-center bg-[#090a0f] border border-white/5 lg:rounded-2xl p-4 min-h-0 overflow-hidden transition-all">
-
-        <!-- Ambient Top Cinema HUD Pill -->
-        <div class="absolute top-3 inset-x-0 flex items-center justify-between px-6 {isFullscreen ? 'fixed z-[60]' : 'z-20'} pointer-events-none">
-          <!-- Aspect ratio selector: Mobile single-box dropdown + Desktop modern vector icon pill -->
-          <!-- Desktop Bar (sm:flex) -->
-          <div class="hidden sm:flex items-center gap-1 spatial-glass p-1 rounded-xl pointer-events-auto shadow-xl">
-            <button
-              onclick={() => editor.aspectRatio = 'original'}
-              class="px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all cursor-pointer flex items-center gap-1.5 {editor.aspectRatio === 'original' ? 'bg-white/20 text-white font-bold shadow-sm' : 'text-neutral-400 hover:text-neutral-200'}"
-              title="Videonun Orijinal En-Boy Oranı"
-            >
-              <div class="w-3.5 h-3.5 border border-current border-dashed rounded-xs opacity-80"></div>
-              <span>Orijinal</span>
-            </button>
-            <button
-              onclick={() => editor.aspectRatio = '16:9'}
-              class="px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all cursor-pointer flex items-center gap-1.5 {editor.aspectRatio === '16:9' ? 'bg-white/20 text-white font-bold shadow-sm' : 'text-neutral-400 hover:text-neutral-200'}"
-              title="Yatay 16:9 (YouTube / Masaüstü)"
-            >
-              <div class="w-4 h-2.5 border border-current rounded-xs"></div>
-              <span>16:9</span>
-            </button>
-            <button
-              onclick={() => editor.aspectRatio = '9:16'}
-              class="px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all cursor-pointer flex items-center gap-1.5 {editor.aspectRatio === '9:16' ? 'bg-purple-600/80 text-white font-bold shadow-[0_0_12px_rgba(168,85,247,0.4)]' : 'text-neutral-400 hover:text-neutral-200'}"
-              title="Dikey 9:16 (TikTok / Reels / Shorts)"
-            >
-              <div class="w-2.5 h-4 border border-current rounded-xs"></div>
-              <span>9:16</span>
-            </button>
-            <button
-              onclick={() => editor.aspectRatio = '1:1'}
-              class="px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all cursor-pointer flex items-center gap-1.5 {editor.aspectRatio === '1:1' ? 'bg-white/20 text-white font-bold shadow-sm' : 'text-neutral-400 hover:text-neutral-200'}"
-              title="Kare 1:1 (Instagram Gönderisi)"
-            >
-              <div class="w-3 h-3 border border-current rounded-xs"></div>
-              <span>1:1</span>
-            </button>
-            <button
-              onclick={() => editor.aspectRatio = '21:9'}
-              class="px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all cursor-pointer flex items-center gap-1.5 {editor.aspectRatio === '21:9' ? 'bg-indigo-600/80 text-white font-bold shadow-[0_0_12px_rgba(99,102,241,0.4)]' : 'text-neutral-400 hover:text-neutral-200'}"
-              title="Sinematik Ultra-Geniş (21:9)"
-            >
-              <div class="w-4.5 h-2 border border-current rounded-xs"></div>
-              <span>21:9</span>
-            </button>
-          </div>
-
-          <!-- Mobile Single-Box Dropdown (sm:hidden) -->
-          <div class="relative sm:hidden pointer-events-auto">
-            <button
-              onclick={() => isAspectRatioDropdownOpen = !isAspectRatioDropdownOpen}
-              class="flex items-center gap-1.5 spatial-glass px-2.5 py-1.5 rounded-xl text-[11px] font-semibold text-neutral-200 border border-white/15 shadow-xl active:scale-95 transition-all cursor-pointer"
-              title="En-Boy Oranı Değiştir"
-            >
-              {#if editor.aspectRatio === '16:9'}
-                <div class="w-3.5 h-2 border border-current rounded-xs"></div>
-                <span>16:9</span>
-              {:else if editor.aspectRatio === '9:16'}
-                <div class="w-2 h-3.5 border border-purple-400 rounded-xs"></div>
-                <span class="text-purple-300 font-bold">9:16</span>
-              {:else if editor.aspectRatio === '1:1'}
-                <div class="w-2.5 h-2.5 border border-current rounded-xs"></div>
-                <span>1:1</span>
-              {:else if editor.aspectRatio === '21:9'}
-                <div class="w-4 h-1.5 border border-indigo-400 rounded-xs"></div>
-                <span class="text-indigo-300">21:9</span>
-              {:else}
-                <div class="w-3 h-3 border border-current border-dashed rounded-xs opacity-80"></div>
-                <span>Orijinal</span>
-              {/if}
-              <ChevronDown size={12} class="text-neutral-400 transition-transform {isAspectRatioDropdownOpen ? 'rotate-180' : ''}" />
-            </button>
-
-            {#if isAspectRatioDropdownOpen}
-              <!-- Dropdown Menu Popover -->
-              <!-- svelte-ignore a11y_click_events_have_key_events -->
-              <div 
-                class="absolute left-0 top-full mt-1.5 w-36 spatial-glass border border-white/15 rounded-xl p-1 shadow-2xl z-50 flex flex-col gap-0.5 animate-in fade-in slide-in-from-top-1 duration-150 backdrop-blur-xl bg-neutral-950/90"
-              >
-                <button
-                  onclick={() => { editor.aspectRatio = 'original'; isAspectRatioDropdownOpen = false; editor.triggerHaptic('light'); }}
-                  class="flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer {editor.aspectRatio === 'original' ? 'bg-white/15 text-white font-bold' : 'text-neutral-300 hover:bg-white/5'}"
-                >
-                  <div class="flex items-center gap-2">
-                    <div class="w-3.5 h-3.5 border border-current border-dashed rounded-xs opacity-75"></div>
-                    <span>Orijinal</span>
-                  </div>
-                  {#if editor.aspectRatio === 'original'}<Check size={12} class="text-cyan-400" />{/if}
-                </button>
-                <button
-                  onclick={() => { editor.aspectRatio = '16:9'; isAspectRatioDropdownOpen = false; editor.triggerHaptic('light'); }}
-                  class="flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer {editor.aspectRatio === '16:9' ? 'bg-white/15 text-white font-bold' : 'text-neutral-300 hover:bg-white/5'}"
-                >
-                  <div class="flex items-center gap-2">
-                    <div class="w-3.5 h-2 border border-current rounded-xs"></div>
-                    <span>16:9 Yatay</span>
-                  </div>
-                  {#if editor.aspectRatio === '16:9'}<Check size={12} class="text-cyan-400" />{/if}
-                </button>
-                <button
-                  onclick={() => { editor.aspectRatio = '9:16'; isAspectRatioDropdownOpen = false; editor.triggerHaptic('light'); }}
-                  class="flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer {editor.aspectRatio === '9:16' ? 'bg-purple-600/30 text-purple-200 font-bold border border-purple-500/30' : 'text-neutral-300 hover:bg-white/5'}"
-                >
-                  <div class="flex items-center gap-2">
-                    <div class="w-2 h-3.5 border border-purple-400 rounded-xs"></div>
-                    <span>9:16 Dikey</span>
-                  </div>
-                  {#if editor.aspectRatio === '9:16'}<Check size={12} class="text-purple-400" />{/if}
-                </button>
-                <button
-                  onclick={() => { editor.aspectRatio = '1:1'; isAspectRatioDropdownOpen = false; editor.triggerHaptic('light'); }}
-                  class="flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer {editor.aspectRatio === '1:1' ? 'bg-white/15 text-white font-bold' : 'text-neutral-300 hover:bg-white/5'}"
-                >
-                  <div class="flex items-center gap-2">
-                    <div class="w-2.5 h-2.5 border border-current rounded-xs"></div>
-                    <span>1:1 Kare</span>
-                  </div>
-                  {#if editor.aspectRatio === '1:1'}<Check size={12} class="text-cyan-400" />{/if}
-                </button>
-                <button
-                  onclick={() => { editor.aspectRatio = '21:9'; isAspectRatioDropdownOpen = false; editor.triggerHaptic('light'); }}
-                  class="flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer {editor.aspectRatio === '21:9' ? 'bg-indigo-600/30 text-indigo-200 font-bold border border-indigo-500/30' : 'text-neutral-300 hover:bg-white/5'}"
-                >
-                  <div class="flex items-center gap-2">
-                    <div class="w-4 h-1.5 border border-indigo-400 rounded-xs"></div>
-                    <span>21:9 Sinema</span>
-                  </div>
-                  {#if editor.aspectRatio === '21:9'}<Check size={12} class="text-indigo-400" />{/if}
-                </button>
-              </div>
-            {/if}
-          </div>
-
-          <!-- Video Engine Status + Timecode + Fullscreen -->
-          <div class="flex items-center gap-2 pointer-events-auto">
-            <div class="spatial-glass px-3 py-1 rounded-xl text-neutral-200 font-mono text-xs font-semibold tracking-wider border border-white/10 shadow-lg">
-              {formatTimecode(editor.playhead)}
-            </div>
-            <button 
-              onpointerdown={(e) => e.stopPropagation()}
-              onpointerup={(e) => e.stopPropagation()}
-              onclick={(e) => {
-                e.stopPropagation();
-                toggleFullscreen();
-              }}
-              class="p-2 spatial-glass hover:bg-white/15 text-neutral-300 hover:text-white rounded-xl transition-all cursor-pointer shadow-lg active:scale-95"
-              title={isFullscreen ? "Tam Ekrandan Çık (Esc)" : "Tam Ekran Önizleme"}
-            >
-              {#if isFullscreen}
-                <Minimize2 size={15} />
-              {:else}
-                <Maximize2 size={15} />
-              {/if}
-            </button>
-          </div>
-        </div>
+      <section class="flex-1 relative flex flex-col items-center justify-center bg-[#090a0f] border border-white/5 lg:rounded-2xl p-1.5 sm:p-2 min-h-0 overflow-hidden transition-all">
 
         <!-- Video Canvas Container (Gesture Area: Double tap for Fullscreen, Pinch to Scale, Tap to Play) -->
         <!-- svelte-ignore a11y_no_noninteractive_element_interactions -->
@@ -1067,24 +909,167 @@
           onpointermove={handleMonitorPointerMove}
           onpointerup={handleMonitorPointerUp}
           onpointercancel={handleMonitorPointerUp}
-          class="relative w-full cursor-pointer select-none touch-none flex items-center justify-center transition-all duration-300 border border-white/10 shadow-2xl overflow-hidden bg-neutral-950 rounded-2xl {isFullscreen ? 'fixed inset-0 z-50 max-w-none max-h-none rounded-none border-none' : (editor.isTimelineCollapsed ? 'max-h-[94%]' : 'max-h-[88%]') + ' ' + (editor.aspectRatio === '9:16' ? (editor.isTimelineCollapsed ? 'max-w-[440px] aspect-[9/16]' : 'max-w-[340px] aspect-[9/16]') : editor.aspectRatio === '16:9' ? (editor.isTimelineCollapsed ? 'max-w-[850px] aspect-[16/9]' : 'max-w-[620px] aspect-[16/9]') : editor.aspectRatio === '21:9' ? (editor.isTimelineCollapsed ? 'max-w-[950px] aspect-[21/9]' : 'max-w-[720px] aspect-[21/9]') : editor.aspectRatio === '1:1' ? (editor.isTimelineCollapsed ? 'max-w-[540px] aspect-square' : 'max-w-[420px] aspect-square') : (editor.isTimelineCollapsed ? 'max-w-[850px]' : 'max-w-[620px]'))}"
-          style={editor.aspectRatio === 'original' && !isFullscreen ? `aspect-ratio: ${editor.originalWidth} / ${editor.originalHeight};` : ''}
+          class="relative w-full h-full flex-1 cursor-pointer select-none touch-none flex items-center justify-center transition-all duration-300 overflow-hidden bg-neutral-950 {isFullscreen ? 'fixed inset-0 z-50 rounded-none border-none' : 'rounded-2xl border border-white/10 shadow-2xl'}"
         >
-          {#if isFullscreen}
-            <button
-              onpointerdown={(e) => e.stopPropagation()}
-              onpointerup={(e) => e.stopPropagation()}
-              onclick={(e) => {
-                e.stopPropagation();
-                toggleFullscreen();
-              }}
-              class="absolute top-4 right-4 z-[70] px-3.5 py-2 bg-neutral-900/90 hover:bg-neutral-800 text-white rounded-xl border border-white/20 shadow-2xl backdrop-blur-md transition-all active:scale-95 cursor-pointer pointer-events-auto flex items-center gap-1.5 text-xs font-semibold"
-              title="Tam Ekrandan Çık (Esc)"
-            >
-              <Minimize2 size={14} />
-              <span>Tam Ekrandan Çık</span>
-            </button>
-          {/if}
+          <!-- Ambient Top Cinema HUD Pill (Anchored within Monitor Stage so position never jumps on fullscreen) -->
+          <div 
+            class="absolute inset-x-0 flex items-center justify-between px-3 sm:px-5 z-20 pointer-events-none"
+            style="top: max(12px, env(safe-area-inset-top, 12px));"
+          >
+            <!-- Aspect ratio selector: Mobile single-box dropdown + Desktop modern vector icon pill -->
+            <!-- Desktop Bar (sm:flex) -->
+            <div class="hidden sm:flex items-center gap-1 spatial-glass p-1 rounded-xl pointer-events-auto shadow-xl">
+              <button
+                onclick={() => editor.aspectRatio = 'original'}
+                class="px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all cursor-pointer flex items-center gap-1.5 {editor.aspectRatio === 'original' ? 'bg-white/20 text-white font-bold shadow-sm' : 'text-neutral-400 hover:text-neutral-200'}"
+                title="Videonun Orijinal En-Boy Oranı"
+              >
+                <div class="w-3.5 h-3.5 border border-current border-dashed rounded-xs opacity-80"></div>
+                <span>Orijinal</span>
+              </button>
+              <button
+                onclick={() => editor.aspectRatio = '16:9'}
+                class="px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all cursor-pointer flex items-center gap-1.5 {editor.aspectRatio === '16:9' ? 'bg-white/20 text-white font-bold shadow-sm' : 'text-neutral-400 hover:text-neutral-200'}"
+                title="Yatay 16:9 (YouTube / Masaüstü)"
+              >
+                <div class="w-4 h-2.5 border border-current rounded-xs"></div>
+                <span>16:9</span>
+              </button>
+              <button
+                onclick={() => editor.aspectRatio = '9:16'}
+                class="px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all cursor-pointer flex items-center gap-1.5 {editor.aspectRatio === '9:16' ? 'bg-purple-600/80 text-white font-bold shadow-[0_0_12px_rgba(168,85,247,0.4)]' : 'text-neutral-400 hover:text-neutral-200'}"
+                title="Dikey 9:16 (TikTok / Reels / Shorts)"
+              >
+                <div class="w-2.5 h-4 border border-current rounded-xs"></div>
+                <span>9:16</span>
+              </button>
+              <button
+                onclick={() => editor.aspectRatio = '1:1'}
+                class="px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all cursor-pointer flex items-center gap-1.5 {editor.aspectRatio === '1:1' ? 'bg-white/20 text-white font-bold shadow-sm' : 'text-neutral-400 hover:text-neutral-200'}"
+                title="Kare 1:1 (Instagram Gönderisi)"
+              >
+                <div class="w-3 h-3 border border-current rounded-xs"></div>
+                <span>1:1</span>
+              </button>
+              <button
+                onclick={() => editor.aspectRatio = '21:9'}
+                class="px-2.5 py-1 rounded-lg text-[11px] font-medium transition-all cursor-pointer flex items-center gap-1.5 {editor.aspectRatio === '21:9' ? 'bg-indigo-600/80 text-white font-bold shadow-[0_0_12px_rgba(99,102,241,0.4)]' : 'text-neutral-400 hover:text-neutral-200'}"
+                title="Sinematik Ultra-Geniş (21:9)"
+              >
+                <div class="w-4.5 h-2 border border-current rounded-xs"></div>
+                <span>21:9</span>
+              </button>
+            </div>
+
+            <!-- Mobile Single-Box Dropdown (sm:hidden) -->
+            <div class="relative sm:hidden pointer-events-auto">
+              <button
+                onclick={() => isAspectRatioDropdownOpen = !isAspectRatioDropdownOpen}
+                class="flex items-center gap-1.5 spatial-glass px-2.5 py-1.5 rounded-xl text-[11px] font-semibold text-neutral-200 border border-white/15 shadow-xl active:scale-95 transition-all cursor-pointer"
+                title="En-Boy Oranı Değiştir"
+              >
+                {#if editor.aspectRatio === '16:9'}
+                  <div class="w-3.5 h-2 border border-current rounded-xs"></div>
+                  <span>16:9</span>
+                {:else if editor.aspectRatio === '9:16'}
+                  <div class="w-2 h-3.5 border border-purple-400 rounded-xs"></div>
+                  <span class="text-purple-300 font-bold">9:16</span>
+                {:else if editor.aspectRatio === '1:1'}
+                  <div class="w-2.5 h-2.5 border border-current rounded-xs"></div>
+                  <span>1:1</span>
+                {:else if editor.aspectRatio === '21:9'}
+                  <div class="w-4 h-1.5 border border-indigo-400 rounded-xs"></div>
+                  <span class="text-indigo-300">21:9</span>
+                {:else}
+                  <div class="w-3 h-3 border border-current border-dashed rounded-xs opacity-80"></div>
+                  <span>Orijinal</span>
+                {/if}
+                <ChevronDown size={12} class="text-neutral-400 transition-transform {isAspectRatioDropdownOpen ? 'rotate-180' : ''}" />
+              </button>
+
+              {#if isAspectRatioDropdownOpen}
+                <!-- Dropdown Menu Popover -->
+                <!-- svelte-ignore a11y_click_events_have_key_events -->
+                <div 
+                  class="absolute left-0 top-full mt-1.5 w-36 spatial-glass border border-white/15 rounded-xl p-1 shadow-2xl z-50 flex flex-col gap-0.5 animate-in fade-in slide-in-from-top-1 duration-150 backdrop-blur-xl bg-neutral-950/90"
+                >
+                  <button
+                    onclick={() => { editor.aspectRatio = 'original'; isAspectRatioDropdownOpen = false; editor.triggerHaptic('light'); }}
+                    class="flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer {editor.aspectRatio === 'original' ? 'bg-white/15 text-white font-bold' : 'text-neutral-300 hover:bg-white/5'}"
+                  >
+                    <div class="flex items-center gap-2">
+                      <div class="w-3.5 h-3.5 border border-current border-dashed rounded-xs opacity-75"></div>
+                      <span>Orijinal</span>
+                    </div>
+                    {#if editor.aspectRatio === 'original'}<Check size={12} class="text-cyan-400" />{/if}
+                  </button>
+                  <button
+                    onclick={() => { editor.aspectRatio = '16:9'; isAspectRatioDropdownOpen = false; editor.triggerHaptic('light'); }}
+                    class="flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer {editor.aspectRatio === '16:9' ? 'bg-white/15 text-white font-bold' : 'text-neutral-300 hover:bg-white/5'}"
+                  >
+                    <div class="flex items-center gap-2">
+                      <div class="w-3.5 h-2 border border-current rounded-xs"></div>
+                      <span>16:9 Yatay</span>
+                    </div>
+                    {#if editor.aspectRatio === '16:9'}<Check size={12} class="text-cyan-400" />{/if}
+                  </button>
+                  <button
+                    onclick={() => { editor.aspectRatio = '9:16'; isAspectRatioDropdownOpen = false; editor.triggerHaptic('light'); }}
+                    class="flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer {editor.aspectRatio === '9:16' ? 'bg-purple-600/30 text-purple-200 font-bold border border-purple-500/30' : 'text-neutral-300 hover:bg-white/5'}"
+                  >
+                    <div class="flex items-center gap-2">
+                      <div class="w-2 h-3.5 border border-purple-400 rounded-xs"></div>
+                      <span>9:16 Dikey</span>
+                    </div>
+                    {#if editor.aspectRatio === '9:16'}<Check size={12} class="text-purple-400" />{/if}
+                  </button>
+                  <button
+                    onclick={() => { editor.aspectRatio = '1:1'; isAspectRatioDropdownOpen = false; editor.triggerHaptic('light'); }}
+                    class="flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer {editor.aspectRatio === '1:1' ? 'bg-white/15 text-white font-bold' : 'text-neutral-300 hover:bg-white/5'}"
+                  >
+                    <div class="flex items-center gap-2">
+                      <div class="w-2.5 h-2.5 border border-current rounded-xs"></div>
+                      <span>1:1 Kare</span>
+                    </div>
+                    {#if editor.aspectRatio === '1:1'}<Check size={12} class="text-cyan-400" />{/if}
+                  </button>
+                  <button
+                    onclick={() => { editor.aspectRatio = '21:9'; isAspectRatioDropdownOpen = false; editor.triggerHaptic('light'); }}
+                    class="flex items-center justify-between px-2.5 py-1.5 rounded-lg text-xs font-medium transition-colors cursor-pointer {editor.aspectRatio === '21:9' ? 'bg-indigo-600/30 text-indigo-200 font-bold border border-indigo-500/30' : 'text-neutral-300 hover:bg-white/5'}"
+                  >
+                    <div class="flex items-center gap-2">
+                      <div class="w-4 h-1.5 border border-indigo-400 rounded-xs"></div>
+                      <span>21:9 Sinema</span>
+                    </div>
+                    {#if editor.aspectRatio === '21:9'}<Check size={12} class="text-indigo-400" />{/if}
+                  </button>
+                </div>
+              {/if}
+            </div>
+
+            <!-- Video Engine Status + Timecode + Fullscreen Toggle -->
+            <div class="flex items-center gap-2 pointer-events-auto">
+              <div class="spatial-glass px-3 py-1 rounded-xl text-neutral-200 font-mono text-xs font-semibold tracking-wider border border-white/10 shadow-lg">
+                {formatTimecode(editor.playhead)}
+              </div>
+              <button 
+                onpointerdown={(e) => e.stopPropagation()}
+                onpointerup={(e) => e.stopPropagation()}
+                onclick={(e) => {
+                  e.stopPropagation();
+                  toggleFullscreen();
+                }}
+                class="p-2 spatial-glass hover:bg-white/15 text-neutral-300 hover:text-white rounded-xl transition-all cursor-pointer shadow-lg active:scale-95"
+                title={isFullscreen ? "Tam Ekrandan Çık (Esc)" : "Tam Ekran Önizleme"}
+              >
+                {#if isFullscreen}
+                  <Minimize2 size={15} />
+                {:else}
+                  <Maximize2 size={15} />
+                {/if}
+              </button>
+            </div>
+          </div>
           <!-- Scaling wrapper with Svelte 5 Error Boundary -->
           <svelte:boundary>
             <div 
@@ -1173,7 +1158,7 @@
 
           <!-- Zoom scale indicator badge when zoomed in/out -->
           {#if Math.abs(canvasScale - 1) > 0.05}
-            <div class="absolute top-4 left-4 z-20 flex items-center gap-1.5 spatial-glass rounded-full px-2.5 py-1 text-[10px] font-mono text-neutral-300">
+            <div class="absolute bottom-4 left-4 z-20 flex items-center gap-1.5 spatial-glass rounded-full px-2.5 py-1 text-[10px] font-mono text-neutral-300">
               <span>{Math.round(canvasScale * 100)}%</span>
               <button 
                 onclick={(e) => { e.stopPropagation(); resetCanvasScale(); }}
@@ -1185,16 +1170,6 @@
             </div>
           {/if}
 
-          <!-- Fullscreen Floating Exit Button (Always visible when in Fullscreen) -->
-          {#if isFullscreen}
-            <button 
-              onclick={(e) => { e.stopPropagation(); toggleFullscreen(); }}
-              class="absolute top-6 right-6 z-30 p-2.5 rounded-full spatial-glass text-white shadow-2xl transition-all active:scale-95 flex items-center gap-1.5 text-xs"
-            >
-              <Minimize2 size={16} />
-              <span>Kapat</span>
-            </button>
-          {/if}
         </div>
       </section>
 

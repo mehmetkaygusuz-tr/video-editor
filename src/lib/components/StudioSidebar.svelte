@@ -109,7 +109,7 @@
         startAt = editor.playhead;
       }
 
-      editor.addClip(
+      const vClip = editor.addClip(
         vTrack.id,
         asset.name,
         startAt,
@@ -131,7 +131,7 @@
         duration,
         '#10b981',
         asset.id,
-        { type: 'audio' }
+        { type: 'audio', parentClipId: vClip?.id }
       );
 
       editor.announce(`"${asset.name}" video ve ses kanallarına eklendi.`);

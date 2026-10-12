@@ -868,28 +868,55 @@ class VideoEditor {
   }
 
   updateClipBounds(clipId: string, startAt: number, duration: number, sourceOffset: number, save: boolean = true) {
+    let targetClip: TimelineClip | null = null;
     for (const track of this.tracks) {
       const clip = track.clips.find(c => c.id === clipId);
       if (clip) {
-        clip.startAt = Math.max(0, startAt);
-        const validOffset = Math.max(0, sourceOffset);
-        let validDuration = Math.max(0.1, duration);
+        targetClip = clip;
+        break;
+      }
+    }
+
+    if (targetClip) {
+      const applyBounds = (c: TimelineClip, sAt: number, dur: number, sOff: number) => {
+        c.startAt = Math.max(0, sAt);
+        const validOffset = Math.max(0, sOff);
+        let validDuration = Math.max(0.1, dur);
 
         // Enforce asset duration boundary to prevent audio/video desync beyond actual file length
-        if (clip.assetId) {
-          const asset = this.assets.find(a => a.id === clip.assetId);
+        if (c.assetId) {
+          const asset = this.assets.find(a => a.id === c.assetId);
           if (asset && asset.duration && asset.duration > 0) {
             const maxDuration = Math.max(0.1, asset.duration - validOffset);
             validDuration = Math.min(validDuration, maxDuration);
           }
         }
 
-        clip.duration = validDuration;
-        clip.sourceOffset = validOffset;
-        this.renderFrameDirty = true;
-        if (save) this.saveState();
-        break;
+        c.duration = validDuration;
+        c.sourceOffset = validOffset;
+      };
+
+      applyBounds(targetClip, startAt, duration, sourceOffset);
+
+      // Synchronize linked companion clips (e.g. linked audio or paired video)
+      for (const track of this.tracks) {
+        for (const companion of track.clips) {
+          if (companion.id === targetClip.id) continue;
+          const isLinkedChild = companion.parentClipId === targetClip.id;
+          const isLinkedParent = targetClip.parentClipId === companion.id;
+          const isSameAssetCompanion = !!(targetClip.assetId && companion.assetId === targetClip.assetId && (
+            (targetClip.type === 'video' && companion.type === 'audio') ||
+            (targetClip.type === 'audio' && companion.type === 'video')
+          ));
+
+          if (isLinkedChild || isLinkedParent || isSameAssetCompanion) {
+            applyBounds(companion, targetClip.startAt, targetClip.duration, targetClip.sourceOffset);
+          }
+        }
       }
+
+      this.renderFrameDirty = true;
+      if (save) this.saveState();
     }
   }
 
@@ -1108,12 +1135,38 @@ class VideoEditor {
 
     if (clipId || this.selectedClipId) {
       const searchId = clipId || this.selectedClipId;
+      let primaryClip: TimelineClip | null = null;
       for (const track of this.tracks) {
         if (track.isLocked) continue;
         const found = track.clips.find(c => c.id === searchId);
         if (found) {
+          primaryClip = found;
           targetsToSplit.push({ track, clip: found });
           break;
+        }
+      }
+
+      // Synchronized Audio & Video Splitting:
+      // If primary clip is video/audio, automatically find and split its linked/companion clip at the exact same frame
+      if (primaryClip) {
+        for (const track of this.tracks) {
+          if (track.isLocked) continue;
+          for (const c of track.clips) {
+            if (c.id === primaryClip.id) continue;
+            const isLinked = c.parentClipId === primaryClip.id || primaryClip.parentClipId === c.id;
+            const isSameAssetPair = !!(primaryClip.assetId && c.assetId === primaryClip.assetId && (
+              (primaryClip.type === 'video' && c.type === 'audio') ||
+              (primaryClip.type === 'audio' && c.type === 'video')
+            ));
+
+            if (isLinked || isSameAssetPair) {
+              if (splitTime > c.startAt + 0.05 && splitTime < c.startAt + c.duration - 0.05) {
+                if (!targetsToSplit.some(t => t.clip.id === c.id)) {
+                  targetsToSplit.push({ track, clip: c });
+                }
+              }
+            }
+          }
         }
       }
     } else {
@@ -1134,6 +1187,7 @@ class VideoEditor {
 
     let lastCreatedClipId: string | null = null;
     let splitCount = 0;
+    const createdPairs: { left: TimelineClip; right: TimelineClip }[] = [];
 
     for (const { track: targetTrack, clip: targetClip } of targetsToSplit) {
       if (splitTime <= targetClip.startAt + 0.05 || splitTime >= targetClip.startAt + targetClip.duration - 0.05) {
@@ -1191,6 +1245,7 @@ class VideoEditor {
       };
 
       targetTrack.clips.push(newRightClip);
+      createdPairs.push({ left: targetClip, right: newRightClip });
 
       // Re-anchor any connected child clips starting after splitTime to the new right clip
       for (const track of this.tracks) {
@@ -1207,11 +1262,27 @@ class VideoEditor {
       splitCount++;
     }
 
+    // Re-link audio & video pairs across both left and right split halves
+    for (const pair of createdPairs) {
+      if (pair.left.type === 'audio') {
+        const videoMatch = createdPairs.find(
+          p => p.left.type === 'video' && 
+          (p.left.id === pair.left.parentClipId || (p.left.assetId && p.left.assetId === pair.left.assetId))
+        );
+        if (videoMatch) {
+          pair.left.parentClipId = videoMatch.left.id;
+          pair.right.parentClipId = videoMatch.right.id;
+          // Prefer selecting the video clip
+          lastCreatedClipId = videoMatch.right.id;
+        }
+      }
+    }
+
     if (splitCount > 0) {
       if (lastCreatedClipId) this.selectedClipId = lastCreatedClipId;
       this.saveState();
       this.triggerHaptic('medium');
-      this.announce(splitCount === 1 ? 'Klip bölündü' : `${splitCount} kanal aynı anda bölündü`);
+      this.announce(splitCount === 1 ? 'Klip bölündü' : `${splitCount} kanal (ses ve video) aynı anda bölündü`);
     } else {
       this.announce('Klip bölme için en az 1 kare mesafe gereklidir.');
     }
