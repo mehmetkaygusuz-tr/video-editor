@@ -106,6 +106,7 @@ export class MasterAudioClock {
    * Start playback anchored to the hardware clock and schedule audio nodes.
    */
   public async start(timelineTime: number, tracks: TimelineTrack[], rate: number = 1.0) {
+    this.anchorTimelineTime = Math.max(0, timelineTime);
     await this.ensureUnlocked();
     const ctx = this.getAudioContext();
     if (ctx.state === 'suspended') {

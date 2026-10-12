@@ -1477,6 +1477,7 @@ class VideoEditor {
   }
 
   togglePlayback() {
+    this.isScrubbing = false;
     if (!this.isPlaying && this.duration > 0 && this.playhead >= this.duration - 0.05) {
       this.playhead = 0;
       masterAudioClock.seek(0, this.tracks);

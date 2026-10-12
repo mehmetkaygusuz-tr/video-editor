@@ -558,25 +558,27 @@
     const dt = (now - lastTime) / 1000;
     lastTime = now;
     
-    if (editor.isPlaying && !editor.isScrubbing) {
-      const masterTime = masterAudioClock.getCurrentTime();
-      editor.playhead = masterTime;
-      if (editor.playhead >= editor.duration) {
-        editor.playhead = editor.duration;
-        editor.togglePlayback();
+    if (editor.isPlaying) {
+      if (!editor.isScrubbing) {
+        const masterTime = masterAudioClock.getCurrentTime();
+        editor.playhead = masterTime;
+        if (editor.playhead >= editor.duration) {
+          editor.playhead = editor.duration;
+          editor.togglePlayback();
+        }
       }
       
       // Periodically schedule upcoming audio clips within the lookahead window
-      masterAudioClock.checkLookahead(masterTime, editor.tracks);
+      masterAudioClock.checkLookahead(editor.playhead, editor.tracks);
 
       // Periodically preload upcoming video decoders within lookahead window
-      checkVideoLookahead(masterTime);
+      checkVideoLookahead(editor.playhead);
 
       // Hardware latency-compensated video presentation time (Master Audio Clock)
       const videoPTS = masterAudioClock.getVideoPresentationTime(editor.playhead);
       seekAndRenderVideoFrame(videoPTS, true);
     } else {
-      // Render frame when paused or scrubbing only when playhead changed or frame is dirty (eliminates 60 FPS idle invalidations)
+      // Render frame when paused only when playhead changed or frame is dirty (eliminates 60 FPS idle invalidations)
       if (editor.renderFrameDirty || Math.abs(editor.playhead - lastRenderedPlayhead) > 0.0005) {
         lastRenderedPlayhead = editor.playhead;
         seekAndRenderVideoFrame(editor.playhead, false);

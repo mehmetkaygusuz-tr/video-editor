@@ -305,30 +305,24 @@
     }
   }
 
-  let wasPlayingBeforeScrub = false;
-
   function beginPlayheadScrub(clientX: number) {
     isDraggingPlayhead = true;
     editor.isScrubbing = true;
     isPanning = false;
     activeClipDrag = null;
-    if (editor.isPlaying) {
-      wasPlayingBeforeScrub = true;
-      editor.isPlaying = false;
-      masterAudioClock.pause();
-    }
     updatePlayhead(clientX);
-    scheduleSettleSeek();
     editor.renderFrameDirty = true;
   }
 
   let settleSeekTimer: any;
   function scheduleSettleSeek() {
     clearTimeout(settleSeekTimer);
-    settleSeekTimer = setTimeout(() => {
-      editor.renderFrameDirty = true;
-      masterAudioClock.seek(editor.playhead, editor.tracks);
-    }, 40);
+    if (!editor.isPlaying) {
+      settleSeekTimer = setTimeout(() => {
+        editor.renderFrameDirty = true;
+        masterAudioClock.seek(editor.playhead, editor.tracks);
+      }, 40);
+    }
   }
 
   function handlePlayheadPointerDown(e: PointerEvent) {
@@ -587,16 +581,13 @@
     }
 
     if (activePointers.size === 0) {
+      clearTimeout(settleSeekTimer);
       if (isDraggingPlayhead) {
-        editor.isScrubbing = false;
         masterAudioClock.seek(editor.playhead, editor.tracks);
         editor.renderFrameDirty = true;
-        if (wasPlayingBeforeScrub) {
-          wasPlayingBeforeScrub = false;
-          editor.togglePlayback();
-        }
       }
       isDraggingPlayhead = false;
+      editor.isScrubbing = false;
       isPanning = false;
       activeSnapGuide = null;
     } else if (activePointers.size === 1) {
@@ -673,6 +664,11 @@
     }
 
     editor.playhead = Number(newTime.toFixed(3));
+    if (editor.isPlaying) {
+      masterAudioClock.seek(editor.playhead, editor.tracks);
+    } else {
+      scheduleSettleSeek();
+    }
   }
 
   function handleDragOver(e: DragEvent) {
@@ -908,6 +904,7 @@
   onpointermove={handlePointerMove}
   onpointerup={handlePointerUp}
   onpointercancel={handlePointerUp}
+  onpointerleave={handlePointerUp}
   role="region"
   aria-label="Zaman Çizelgesi Düzenleyici"
 >
