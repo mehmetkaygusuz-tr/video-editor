@@ -46,7 +46,7 @@ function cloudflarePagesAssetGuard(): Plugin {
       }
     },
     closeBundle() {
-      // Diske yazılmış olası kalıntıları temizle (Defense-in-depth)
+      // 1. Diske yazılmış olası kalıntıları temizle (Defense-in-depth)
       const distAssetsDir = path.resolve(process.cwd(), 'dist/assets');
       if (fs.existsSync(distAssetsDir)) {
         const files = fs.readdirSync(distAssetsDir);
@@ -61,6 +61,16 @@ function cloudflarePagesAssetGuard(): Plugin {
             }
           }
         }
+      }
+
+      // 2. Cloudflare Pages Resmi SPA Fallback Desteği (200.html)
+      // _redirects döngü uyarılarına gerek kalmadan yerel SPA rotalamasını sağlar
+      const distIndex = path.resolve(process.cwd(), 'dist/index.html');
+      const dist200 = path.resolve(process.cwd(), 'dist/200.html');
+      if (fs.existsSync(distIndex)) {
+        try {
+          fs.copyFileSync(distIndex, dist200);
+        } catch (_) {}
       }
     }
   };
@@ -106,6 +116,14 @@ export default defineConfig({
   build: {
     chunkSizeWarningLimit: 2500,
     rollupOptions: {
+      onwarn(warning, defaultHandler) {
+        if (warning.code === 'PLUGIN_TIMINGS') return;
+        defaultHandler(warning);
+      },
+      // @ts-ignore - Rolldown performance diagnostic check option
+      checks: {
+        bundlerTimings: false
+      },
       output: {
         manualChunks(id) {
           if (id.includes('node_modules')) {
