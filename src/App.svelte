@@ -1162,11 +1162,60 @@
               <span>{Math.round(canvasScale * 100)}%</span>
               <button 
                 onclick={(e) => { e.stopPropagation(); resetCanvasScale(); }}
-                class="hover:text-white ml-1 text-neutral-400"
+                class="hover:text-white ml-1 text-neutral-400 cursor-pointer"
                 title="Ölçeği Sıfırla (%100)"
               >
                 <RefreshCw size={11} />
               </button>
+            </div>
+          {/if}
+
+          <!-- AI 9:16 Auto-Reframe Smart Safe-Zone Guide Overlay -->
+          {#if editor.showReframeGuide}
+            <div class="absolute inset-0 pointer-events-none z-25 flex items-center justify-center">
+              <div class="relative h-[92%] aspect-[9/16] border-2 border-dashed border-cyan-400/80 rounded-xl shadow-[0_0_30px_rgba(6,182,212,0.35)] flex flex-col justify-between overflow-hidden">
+                <!-- Rule-of-Thirds Grid Lines -->
+                <div class="absolute inset-0 grid grid-cols-3 grid-rows-3 pointer-events-none">
+                  <div class="border-r border-b border-cyan-400/20"></div>
+                  <div class="border-r border-b border-cyan-400/20"></div>
+                  <div class="border-b border-cyan-400/20"></div>
+                  <div class="border-r border-b border-cyan-400/20"></div>
+                  <div class="border-r border-b border-cyan-400/20"></div>
+                  <div class="border-b border-cyan-400/20"></div>
+                  <div class="border-r border-cyan-400/20"></div>
+                  <div class="border-r border-cyan-400/20"></div>
+                  <div></div>
+                </div>
+
+                <!-- Center Crosshair Target -->
+                <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
+                  <div class="w-6 h-6 border border-cyan-400/40 rounded-full flex items-center justify-center">
+                    <div class="w-1.5 h-1.5 bg-cyan-400 rounded-full shadow-[0_0_8px_#06b6d4]"></div>
+                  </div>
+                </div>
+
+                <!-- Top Safe Zone Header Pill -->
+                <div class="pt-3 px-3 flex items-center justify-between pointer-events-auto">
+                  <div class="px-2 py-0.5 rounded-full bg-cyan-950/80 border border-cyan-500/50 text-[10px] font-mono font-bold text-cyan-300 shadow flex items-center gap-1 backdrop-blur-md">
+                    <span class="w-2 h-2 rounded-full bg-cyan-400 animate-pulse"></span>
+                    <span>9:16 Reels/Shorts Kadrajı</span>
+                  </div>
+                  <button
+                    onclick={(e) => { e.stopPropagation(); editor.showReframeGuide = false; }}
+                    class="p-1 rounded-full bg-neutral-950/80 hover:bg-neutral-800 text-neutral-400 hover:text-white border border-neutral-700/60 transition-colors pointer-events-auto cursor-pointer"
+                    title="Kılavuzu Kapat"
+                  >
+                    <X size={11} />
+                  </button>
+                </div>
+
+                <!-- Bottom Safe Zone Indicator -->
+                <div class="pb-3 px-3 flex items-center justify-center">
+                  <div class="px-2 py-0.5 rounded-full bg-black/60 border border-white/10 text-[9px] font-mono text-neutral-400 backdrop-blur-md">
+                    Güvenli Başlık Alanı (%15-%85)
+                  </div>
+                </div>
+              </div>
             </div>
           {/if}
 

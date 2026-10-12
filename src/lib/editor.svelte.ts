@@ -93,6 +93,9 @@ class VideoEditor {
   isTimelineCollapsed = $state(false);
   isBottomPanelExpanded = $state(false);
   isExportOpen = $state(false);
+  showReframeGuide = $state<boolean>(false);
+  activeTranscriptMode = $state<'list' | 'text'>('text');
+  transcriptSearchQuery = $state<string>('');
 
   // SMPTE In / Out Edit Range (3-Point Editing & Regional Render)
   inPoint = $state<number | null>(null);
@@ -1079,6 +1082,125 @@ class VideoEditor {
     this.saveState();
     this.triggerHaptic('medium');
     this.announce(`${duration.toFixed(1)}s konuşma aralığı metin üzerinden kesildi.`);
+  }
+
+  splitClipAtCutPoints(clipId: string, cutPoints: number[]): number {
+    const track = this.tracks.find(t => t.clips.some(c => c.id === clipId));
+    if (!track) return 0;
+    const clip = track.clips.find(c => c.id === clipId);
+    if (!clip || cutPoints.length === 0) return 0;
+
+    const validCuts = [...cutPoints]
+      .filter(t => t > 0.15 && t < clip.duration - 0.15)
+      .sort((a, b) => a - b);
+
+    if (validCuts.length === 0) return 0;
+
+    const originalIdx = track.clips.findIndex(c => c.id === clipId);
+    const originalClip = track.clips[originalIdx];
+
+    let linkedAudioTrack: any;
+    let linkedAudioClip: any;
+    if (originalClip.type === 'video' && originalClip.assetId) {
+      for (const tr of this.tracks) {
+        if (tr.type === 'audio' || tr.name.startsWith('A')) {
+          const match = tr.clips.find(c => c.assetId === originalClip.assetId && Math.abs(c.startAt - originalClip.startAt) < 0.1);
+          if (match) {
+            linkedAudioTrack = tr;
+            linkedAudioClip = match;
+            break;
+          }
+        }
+      }
+    }
+
+    track.clips.splice(originalIdx, 1);
+    if (linkedAudioTrack && linkedAudioClip) {
+      const aIdx = linkedAudioTrack.clips.findIndex((c: any) => c.id === linkedAudioClip.id);
+      if (aIdx !== -1) linkedAudioTrack.clips.splice(aIdx, 1);
+    }
+
+    const boundaries = [0, ...validCuts, originalClip.duration];
+    let runningPos = originalClip.startAt;
+
+    for (let i = 0; i < boundaries.length - 1; i++) {
+      const segStart = boundaries[i];
+      const segEnd = boundaries[i + 1];
+      const segDur = Number((segEnd - segStart).toFixed(3));
+      if (segDur <= 0.05) continue;
+
+      this.addClip(
+        track.id,
+        `${originalClip.name} [Sahne ${i + 1}]`,
+        Number(runningPos.toFixed(3)),
+        segDur,
+        originalClip.color,
+        originalClip.assetId,
+        {
+          sourceOffset: Number(((originalClip.sourceOffset || 0) + segStart).toFixed(3)),
+          sourceUrl: originalClip.sourceUrl,
+          type: originalClip.type,
+          cropRect: originalClip.cropRect ? { ...originalClip.cropRect } : undefined,
+          isBgRemoved: originalClip.isBgRemoved,
+          colorGrading: originalClip.colorGrading ? { ...originalClip.colorGrading } : undefined,
+          speed: originalClip.speed,
+          volume: originalClip.volume
+        }
+      );
+
+      if (linkedAudioTrack && linkedAudioClip) {
+        this.addClip(
+          linkedAudioTrack.id,
+          `${linkedAudioClip.name} [Sahne ${i + 1}]`,
+          Number(runningPos.toFixed(3)),
+          segDur,
+          linkedAudioClip.color || '#10b981',
+          originalClip.assetId,
+          {
+            sourceOffset: Number(((linkedAudioClip.sourceOffset || 0) + segStart).toFixed(3)),
+            type: 'audio',
+            volume: linkedAudioClip.volume
+          }
+        );
+      }
+
+      runningPos += segDur;
+    }
+
+    this.saveState();
+    this.announce(`Klip ${validCuts.length + 1} sahneye bölündü.`);
+    return validCuts.length + 1;
+  }
+
+  pruneFillerWordsFromTranscript(): number {
+    const fillerRegex = /^(?:ııı+|eee+|şey|yani|yaani|falan|hımm+|um|uh|like)$/i;
+    let prunedCount = 0;
+
+    for (const track of this.tracks) {
+      for (const clip of track.clips) {
+        if (!clip.subtitles || clip.subtitles.length === 0) continue;
+
+        for (const sub of clip.subtitles) {
+          if (!sub.words || sub.words.length === 0) continue;
+
+          const fillers = sub.words.filter(w => fillerRegex.test(w.word.trim().replace(/[.,!?;:]/g, '')));
+          for (const fw of fillers) {
+            const fwStart = Number((clip.startAt + fw.start).toFixed(3));
+            const fwEnd = Number((clip.startAt + fw.end).toFixed(3));
+            if (fwEnd - fwStart >= 0.05) {
+              this.rippleCutRange(fwStart, fwEnd);
+              prunedCount++;
+            }
+          }
+        }
+      }
+    }
+
+    if (prunedCount > 0) {
+      this.saveState();
+      this.announce(`${prunedCount} dolgu kelimesi videodan kesilip temizlendi.`);
+    }
+    return prunedCount;
   }
 
   applyTransitionToCut(trackId: string, prevClipId: string, nextClipId: string, type: TransitionType, duration = 0.5) {

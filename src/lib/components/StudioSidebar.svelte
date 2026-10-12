@@ -10,7 +10,8 @@
   import { 
     FolderClosed, Sparkles, SlidersHorizontal as Sliders, Type, Upload, Plus, Trash as Trash2, 
     Scissors, Volume2, Music, Crop, Layers, Cpu, Check, 
-    RotateCcw, Play, ShieldCheck, FastForward, Film, Image as ImageIcon, X, Gauge, Wand2, Palette, ChevronRight
+    RotateCcw, Play, ShieldCheck, FastForward, Film, Image as ImageIcon, X, Gauge, Wand2, Palette, ChevronRight,
+    Search, Eraser, FileText, ListFilter
   } from '@lucide/svelte';
 
   let { onClose, isMobileSheet = false, hideTabs = false }: { onClose?: () => void; isMobileSheet?: boolean; hideTabs?: boolean } = $props();
@@ -37,6 +38,54 @@
   let selectedClip = $derived(editor.selectedClip);
   let allSubtitles = $derived(
     editor.tracks.flatMap(t => t.clips.flatMap(c => (c.subtitles || []).map(s => ({ clipId: c.id, clipName: c.name, sub: s }))))
+  );
+
+  const fillerWordRegex = /^(?:ııı+|eee+|şey|yani|yaani|falan|hımm+|um|uh|like)$/i;
+
+  let allTranscriptWords = $derived(
+    editor.tracks.flatMap(t => t.clips.flatMap(c => {
+      const clipStart = c.startAt;
+      return (c.subtitles || []).flatMap(s => {
+        if (s.words && s.words.length > 0) {
+          return s.words.map((w, idx) => ({
+            clipId: c.id,
+            clipName: c.name,
+            subId: s.id,
+            wordIdx: idx,
+            word: w.word,
+            globalStart: Number((clipStart + w.start).toFixed(3)),
+            globalEnd: Number((clipStart + w.end).toFixed(3)),
+            confidence: w.confidence ?? 1.0,
+            isFiller: fillerWordRegex.test(w.word.trim().replace(/[.,!?;:]/g, ''))
+          }));
+        } else {
+          const rawWords = s.text.trim().split(/\s+/).filter(Boolean);
+          const dur = Math.max(0.2, s.end - s.start);
+          const wordDur = dur / Math.max(1, rawWords.length);
+          return rawWords.map((word, idx) => ({
+            clipId: c.id,
+            clipName: c.name,
+            subId: s.id,
+            wordIdx: idx,
+            word,
+            globalStart: Number((clipStart + s.start + idx * wordDur).toFixed(3)),
+            globalEnd: Number((clipStart + s.start + (idx + 1) * wordDur).toFixed(3)),
+            confidence: 0.95,
+            isFiller: fillerWordRegex.test(word.trim().replace(/[.,!?;:]/g, ''))
+          }));
+        }
+      });
+    }))
+  );
+
+  let filteredTranscriptWords = $derived(
+    editor.transcriptSearchQuery.trim()
+      ? allTranscriptWords.filter(w => w.word.toLowerCase().includes(editor.transcriptSearchQuery.trim().toLowerCase()))
+      : allTranscriptWords
+  );
+
+  let fillerWordsCount = $derived(
+    allTranscriptWords.filter(w => w.isFiller).length
   );
 
   async function handleFileUpload(event: Event) {
@@ -193,6 +242,18 @@
 
   async function runSmartReframe() {
     await aiService.autoReframe();
+  }
+
+  async function runSceneCut() {
+    await aiService.detectScenes();
+  }
+
+  async function runAudioDucking() {
+    await aiService.autoDuckMusic();
+  }
+
+  async function runPruneFillerWords() {
+    await aiService.pruneFillerWords();
   }
 </script>
 
@@ -552,15 +613,24 @@
           </div>
 
           <div class="p-2.5 bg-neutral-950/50 border border-neutral-800 rounded-xl space-y-2">
-            <div class="flex items-center gap-1.5 text-rose-400">
-              <Crop size={14} />
-              <span class="text-xs font-bold text-white">9:16 Reframe</span>
+            <div class="flex items-center justify-between">
+              <div class="flex items-center gap-1.5 text-rose-400">
+                <Crop size={14} />
+                <span class="text-xs font-bold text-white">9:16 Reframe</span>
+              </div>
+              <button
+                onclick={() => editor.showReframeGuide = !editor.showReframeGuide}
+                class="text-[9px] px-1.5 py-0.5 rounded border transition-colors cursor-pointer {editor.showReframeGuide ? 'bg-cyan-950 text-cyan-300 border-cyan-500/50' : 'bg-neutral-800 text-neutral-400 border-neutral-700'}"
+                title="9:16 Monitör Kılavuz Çerçevesi"
+              >
+                {editor.showReframeGuide ? 'Kılavuz Açık' : 'Kılavuz'}
+              </button>
             </div>
             <p class="text-[10px] text-neutral-400">Konuşmacıyı takip edip dikey kadrajlar.</p>
             <button
               onclick={runSmartReframe}
               disabled={aiService.isRunning}
-              class="w-full py-1.5 rounded-lg bg-rose-700 hover:bg-rose-600 disabled:opacity-50 text-white text-[11px] font-semibold flex items-center justify-center gap-1 transition-all"
+              class="w-full py-1.5 rounded-lg bg-rose-700 hover:bg-rose-600 disabled:opacity-50 text-white text-[11px] font-semibold flex items-center justify-center gap-1 transition-all cursor-pointer"
             >
               <Crop size={11} /> Kadrajla
             </button>
@@ -653,21 +723,77 @@
             <Sparkles size={13} /> Viral Kanca Üret & Klibe Ekle
           </button>
         </div>
+
+        <!-- AI Tool 10: Scene Cut Detection -->
+        <div class="p-3 bg-neutral-950/50 border border-neutral-800 rounded-xl space-y-2">
+          <div class="flex items-start justify-between">
+            <div class="flex items-center gap-2">
+              <div class="p-1.5 rounded-lg bg-indigo-500/15 text-indigo-400 border border-indigo-500/30">
+                <Film size={14} />
+              </div>
+              <div>
+                <h4 class="text-xs font-bold text-white">Sahne & Çekim Ayrıştırma (Scene Cut)</h4>
+                <span class="text-[10px] text-neutral-400 font-mono">Fast Luma-Histogram SBD</span>
+              </div>
+            </div>
+            <span class="text-[10px] bg-indigo-950/80 text-indigo-300 px-1.5 py-0.5 rounded border border-indigo-800/40">WebGPU</span>
+          </div>
+          <p class="text-[11px] text-neutral-400 leading-tight">
+            Kamera çekim geçişlerini piksel fark analiziyle tespit edip videoyu bağımsız sahnelere otomatik böler.
+          </p>
+          <button
+            onclick={runSceneCut}
+            disabled={aiService.isRunning}
+            class="w-full py-2 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition-all shadow-sm cursor-pointer"
+          >
+            <Film size={13} /> Sahneleri Tespit Et ve Böl
+          </button>
+        </div>
+
+        <!-- AI Tool 11: Smart Audio Ducking -->
+        <div class="p-3 bg-neutral-950/50 border border-neutral-800 rounded-xl space-y-2">
+          <div class="flex items-start justify-between">
+            <div class="flex items-center gap-2">
+              <div class="p-1.5 rounded-lg bg-violet-500/15 text-violet-400 border border-violet-500/30">
+                <Sliders size={14} />
+              </div>
+              <div>
+                <h4 class="text-xs font-bold text-white">Akıllı Ses Kısma (Smart Ducking)</h4>
+                <span class="text-[10px] text-neutral-400 font-mono">Speech-Aware Auto-Ducking</span>
+              </div>
+            </div>
+            <span class="text-[10px] bg-violet-950/80 text-violet-300 px-1.5 py-0.5 rounded border border-violet-800/40">Audio</span>
+          </div>
+          <p class="text-[11px] text-neutral-400 leading-tight">
+            Konuşmacı başladığında müzik sesini otomatik -14dB kısar, konuşma bittiğinde akıcı yükseltir.
+          </p>
+          <button
+            onclick={runAudioDucking}
+            disabled={aiService.isRunning}
+            class="w-full py-2 px-3 rounded-lg bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition-all shadow-sm cursor-pointer"
+          >
+            <Sliders size={13} /> Otomatik Müzik Ducking Uygula
+          </button>
+        </div>
       </div>
     </Tabs.Content>
 
-    <!-- 3. TAB CONTENT: CAPTIONS MANAGER -->
+    <!-- 3. TAB CONTENT: CAPTIONS & DESCRIPT TEXT-BASED EDITING -->
     <Tabs.Content value="captions" class="flex-1 overflow-y-auto p-3.5 custom-scrollbar outline-none">
-      <div class="space-y-4">
+      <div class="space-y-3.5">
+        <!-- Header & Mode Switcher -->
         <div class="flex items-center justify-between">
           <div>
-            <h3 class="text-sm font-bold text-white">Altyazı Yöneticisi</h3>
-            <p class="text-[11px] text-neutral-400">Zaman damgalı kelime ve satırları düzenleyin.</p>
+            <h3 class="text-sm font-bold text-white flex items-center gap-1.5">
+              <Type size={16} class="text-yellow-400" />
+              <span>Transkript & Kurgu</span>
+            </h3>
+            <p class="text-[11px] text-neutral-400">Metin üzerinden doğrudan video kesin veya altyazı düzenleyin.</p>
           </div>
           <div class="flex items-center gap-1.5">
             <button
               onclick={() => editor.openBottomSheet('subtitle_style')}
-              class="px-2.5 py-1 bg-neutral-800 hover:bg-neutral-700 text-purple-300 border border-purple-500/30 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors"
+              class="px-2 py-1 bg-neutral-800 hover:bg-neutral-700 text-purple-300 border border-purple-500/30 text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors cursor-pointer"
               title="Tipografi ve Şablon Stillerini Ayarla"
             >
               <Type size={12} /> Stiller
@@ -675,89 +801,214 @@
             <button
               onclick={runWhisperCaptions}
               disabled={aiService.isRunning}
-              class="px-2.5 py-1 bg-purple-600 hover:bg-purple-500 text-white text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors"
+              class="px-2 py-1 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-xs font-semibold rounded-lg flex items-center gap-1 transition-colors cursor-pointer"
             >
               <Sparkles size={12} /> Otomatik Üret
             </button>
           </div>
         </div>
 
-        <!-- Add Subtitle Input -->
-        <div class="flex gap-2">
-          <input
-            type="text"
-            bind:value={newSubtitleText}
-            placeholder="Yeni altyazı satırı..."
-            class="flex-1 px-3 py-1.5 rounded-lg bg-neutral-950 border border-neutral-800 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-blue-500"
-          />
+        <!-- Mode Toggle Pill (Descript Metin Kurgusu vs Liste) -->
+        <div class="flex p-0.5 rounded-lg bg-neutral-950 border border-neutral-800">
           <button
-            onclick={() => {
-              if (!newSubtitleText.trim()) return;
-              const clip = selectedClip || editor.tracks[0]?.clips[0];
-              if (clip) {
-                editor.addSubtitleToClip(clip.id, newSubtitleText);
-                newSubtitleText = '';
-              }
-            }}
-            class="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-white text-xs font-medium rounded-lg transition-colors flex items-center gap-1"
+            onclick={() => editor.activeTranscriptMode = 'text'}
+            class="flex-1 py-1 px-2.5 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer {editor.activeTranscriptMode === 'text' ? 'bg-purple-950/80 border border-purple-500/40 text-purple-200 shadow-sm' : 'text-neutral-400 hover:text-white'}"
           >
-            <Plus size={13} /> Ekle
+            <FileText size={12} />
+            <span>Descript Metin Kurgusu</span>
+          </button>
+          <button
+            onclick={() => editor.activeTranscriptMode = 'list'}
+            class="flex-1 py-1 px-2.5 rounded-md text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer {editor.activeTranscriptMode === 'list' ? 'bg-neutral-800 text-white shadow-sm' : 'text-neutral-400 hover:text-white'}"
+          >
+            <ListFilter size={12} />
+            <span>Altyazı Listesi</span>
           </button>
         </div>
 
-        <!-- Subtitles List -->
-        {#if allSubtitles.length === 0}
-          <div class="p-6 border border-dashed border-neutral-800 rounded-xl text-center flex flex-col items-center justify-center gap-2 text-neutral-500 bg-neutral-950/30">
-            <Type size={24} class="opacity-40" />
-            <span class="text-xs">Henüz altyazı bulunmuyor</span>
-            <button 
-              onclick={runWhisperCaptions}
-              class="text-xs text-purple-400 hover:text-purple-300 font-medium underline"
+        <!-- Transcript Search Bar -->
+        <div class="relative">
+          <Search size={13} class="absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-500" />
+          <input
+            type="text"
+            bind:value={editor.transcriptSearchQuery}
+            placeholder="Transkriptte kelime ara..."
+            class="w-full pl-8 pr-7 py-1.5 rounded-lg bg-neutral-950 border border-neutral-800 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-purple-500 transition-colors"
+          />
+          {#if editor.transcriptSearchQuery}
+            <button
+              onclick={() => editor.transcriptSearchQuery = ''}
+              class="absolute right-2 top-1/2 -translate-y-1/2 text-neutral-500 hover:text-white p-0.5 cursor-pointer"
             >
-              Simüle edilmiş motorla videodan otomatik çıkar
+              <X size={12} />
+            </button>
+          {/if}
+        </div>
+
+        {#if editor.activeTranscriptMode === 'text'}
+          <!-- DESCRIPT MODE: Interactive Word Tokens & Pruning Bar -->
+          {#if allTranscriptWords.length === 0}
+            <div class="p-6 border border-dashed border-neutral-800 rounded-xl text-center flex flex-col items-center justify-center gap-2 text-neutral-500 bg-neutral-950/30">
+              <FileText size={26} class="opacity-40 text-purple-400" />
+              <span class="text-xs font-medium text-neutral-300">Henüz konuşma transkripti yok</span>
+              <p class="text-[11px] text-neutral-400 max-w-xs">
+                Whisper AI ile konuşmaları kelime kelime yazıya dökerek doğrudan metin siler gibi video kesebilirsiniz.
+              </p>
+              <button 
+                onclick={runWhisperCaptions}
+                disabled={aiService.isRunning}
+                class="mt-1 px-3 py-1.5 bg-purple-600 hover:bg-purple-500 disabled:opacity-50 text-white text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <Sparkles size={13} /> Whisper AI ile Transkribe Et
+              </button>
+            </div>
+          {:else}
+            <!-- Filler Word Pruner Action Bar -->
+            <div class="p-2.5 rounded-xl bg-purple-950/30 border border-purple-800/40 flex items-center justify-between gap-2">
+              <div class="flex items-center gap-2 min-w-0">
+                <span class="p-1.5 rounded-lg bg-purple-500/20 text-purple-300 border border-purple-500/30 flex-none">
+                  <Scissors size={13} />
+                </span>
+                <div class="min-w-0">
+                  <div class="text-xs font-bold text-white flex items-center gap-1.5">
+                    <span>Dolgu Kelimeleri</span>
+                    <span class="px-1.5 py-0.2 rounded-full text-[10px] font-mono font-bold {fillerWordsCount > 0 ? 'bg-amber-500/20 text-amber-300 border border-amber-500/30' : 'bg-neutral-800 text-neutral-400'}">
+                      {fillerWordsCount} tespit
+                    </span>
+                  </div>
+                  <p class="text-[10px] text-neutral-400 truncate">"ııı", "eee", "şey", "yani" duraklamaları</p>
+                </div>
+              </div>
+              <button
+                onclick={runPruneFillerWords}
+                disabled={aiService.isRunning || fillerWordsCount === 0}
+                class="px-2.5 py-1.5 rounded-lg bg-amber-600 hover:bg-amber-500 disabled:opacity-40 text-white text-[11px] font-bold flex items-center gap-1 transition-all shadow-sm flex-none cursor-pointer"
+                title="Tüm dolgu kelimelerini videodan manyetik kesip boşlukları birleştirir"
+              >
+                <Eraser size={12} />
+                <span>Tek Tıkla Temizle</span>
+              </button>
+            </div>
+
+            <!-- Descript Interactive Transcript View -->
+            <div class="p-3.5 rounded-xl bg-neutral-950/70 border border-neutral-800 min-h-[220px] max-h-[360px] overflow-y-auto custom-scrollbar select-text leading-relaxed">
+              <div class="text-[10px] uppercase tracking-wider font-bold text-neutral-500 mb-2 flex items-center justify-between">
+                <span>Kelime Akışı ({filteredTranscriptWords.length} kelime)</span>
+                <span class="text-[9px] text-neutral-400">Tıkla: Git | ✂: Doğrudan Kes</span>
+              </div>
+              <div class="flex flex-wrap items-center gap-1">
+                {#each filteredTranscriptWords as w (w.clipId + '_' + w.subId + '_' + w.wordIdx)}
+                  {@const isSpoken = editor.playhead >= w.globalStart && editor.playhead <= w.globalEnd}
+                  <span
+                    class="group relative inline-flex items-center rounded px-1.5 py-0.5 text-xs transition-all {isSpoken
+                      ? 'bg-purple-600 text-white shadow-md shadow-purple-500/60 scale-105 font-bold z-10'
+                      : w.isFiller
+                      ? 'bg-amber-950/60 border border-amber-500/30 text-amber-300 line-through opacity-80 hover:opacity-100'
+                      : 'bg-neutral-900/80 border border-neutral-800/80 text-neutral-200 hover:bg-neutral-800 hover:text-white'}"
+                  >
+                    <button
+                      onclick={() => editor.seekTo(w.globalStart)}
+                      class="cursor-pointer tracking-normal select-none"
+                      title="{w.word} ({w.globalStart.toFixed(2)}s - {w.globalEnd.toFixed(2)}s)"
+                    >
+                      {w.word}
+                    </button>
+                    <!-- Quick Ripple Cut button on hover -->
+                    <button
+                      onclick={(e) => {
+                        e.stopPropagation();
+                        editor.rippleCutRange(w.globalStart, w.globalEnd);
+                      }}
+                      class="opacity-0 group-hover:opacity-100 ml-1 p-0.5 rounded hover:bg-rose-950 hover:text-rose-300 text-neutral-400 transition-opacity cursor-pointer"
+                      title="Bu kelimeyi videodan kes ve birleştir"
+                    >
+                      <Scissors size={10} />
+                    </button>
+                  </span>
+                {/each}
+              </div>
+            </div>
+          {/if}
+
+        {:else}
+          <!-- LIST MODE: Standard Subtitle Segments -->
+          <!-- Add Subtitle Input -->
+          <div class="flex gap-2">
+            <input
+              type="text"
+              bind:value={newSubtitleText}
+              placeholder="Yeni altyazı satırı..."
+              class="flex-1 px-3 py-1.5 rounded-lg bg-neutral-950 border border-neutral-800 text-xs text-white placeholder-neutral-500 focus:outline-none focus:border-blue-500"
+            />
+            <button
+              onclick={() => {
+                if (!newSubtitleText.trim()) return;
+                const clip = selectedClip || editor.tracks[0]?.clips[0];
+                if (clip) {
+                  editor.addSubtitleToClip(clip.id, newSubtitleText);
+                  newSubtitleText = '';
+                }
+              }}
+              class="px-3 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-white text-xs font-medium rounded-lg transition-colors flex items-center gap-1 cursor-pointer"
+            >
+              <Plus size={13} /> Ekle
             </button>
           </div>
-        {:else}
-          <div class="space-y-2">
-            {#each allSubtitles as item (item.clipId + '_' + item.sub.id)}
-              <div class="p-2.5 bg-neutral-950/70 border border-neutral-800 hover:border-neutral-700 rounded-xl space-y-1.5 transition-all">
-                <div class="flex items-center justify-between text-[10px] font-mono text-neutral-400">
-                  <button 
-                    onclick={() => editor.seekTo(item.sub.start)} 
-                    class="hover:text-blue-400 transition-colors flex items-center gap-1 font-bold text-neutral-300"
-                  >
-                    <Play size={9} /> {item.sub.start.toFixed(2)}s - {item.sub.end.toFixed(2)}s
-                  </button>
-                  <div class="flex items-center gap-1.5">
-                    <button
-                      onclick={() => {
-                        editor.rippleCutRange(item.sub.start, item.sub.end);
-                        editor.removeSubtitle(item.clipId, item.sub.id);
-                      }}
-                      class="px-1.5 py-0.5 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 text-[9px] flex items-center gap-1 transition-colors"
-                      title="Bu konuşma aralığını videodan doğrudan kesip çıkar ve boşluğu kapat (Jump-Cut)"
-                    >
-                      <Scissors size={9} />
-                      <span>Videodan Kes</span>
-                    </button>
+
+          <!-- Subtitles List -->
+          {#if allSubtitles.length === 0}
+            <div class="p-6 border border-dashed border-neutral-800 rounded-xl text-center flex flex-col items-center justify-center gap-2 text-neutral-500 bg-neutral-950/30">
+              <Type size={24} class="opacity-40" />
+              <span class="text-xs">Henüz altyazı bulunmuyor</span>
+              <button 
+                onclick={runWhisperCaptions}
+                class="text-xs text-purple-400 hover:text-purple-300 font-medium underline cursor-pointer"
+              >
+                Whisper ile videodan otomatik çıkar
+              </button>
+            </div>
+          {:else}
+            <div class="space-y-2">
+              {#each (editor.transcriptSearchQuery.trim() ? allSubtitles.filter(i => i.sub.text.toLowerCase().includes(editor.transcriptSearchQuery.toLowerCase())) : allSubtitles) as item (item.clipId + '_' + item.sub.id)}
+                <div class="p-2.5 bg-neutral-950/70 border border-neutral-800 hover:border-neutral-700 rounded-xl space-y-1.5 transition-all">
+                  <div class="flex items-center justify-between text-[10px] font-mono text-neutral-400">
                     <button 
-                      onclick={() => editor.removeSubtitle(item.clipId, item.sub.id)}
-                      class="text-neutral-500 hover:text-red-400 transition-colors p-0.5"
-                      title="Sadece Altyazıyı Sil"
+                      onclick={() => editor.seekTo(item.sub.start)} 
+                      class="hover:text-blue-400 transition-colors flex items-center gap-1 font-bold text-neutral-300 cursor-pointer"
                     >
-                      <Trash2 size={11} />
+                      <Play size={9} /> {item.sub.start.toFixed(2)}s - {item.sub.end.toFixed(2)}s
                     </button>
+                    <div class="flex items-center gap-1.5">
+                      <button
+                        onclick={() => {
+                          editor.rippleCutRange(item.sub.start, item.sub.end);
+                          editor.removeSubtitle(item.clipId, item.sub.id);
+                        }}
+                        class="px-1.5 py-0.5 rounded bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 text-[9px] flex items-center gap-1 transition-colors cursor-pointer"
+                        title="Bu konuşma aralığını videodan doğrudan kesip çıkar ve boşluğu kapat (Jump-Cut)"
+                      >
+                        <Scissors size={9} />
+                        <span>Videodan Kes</span>
+                      </button>
+                      <button 
+                        onclick={() => editor.removeSubtitle(item.clipId, item.sub.id)}
+                        class="text-neutral-500 hover:text-red-400 transition-colors p-0.5 cursor-pointer"
+                        title="Sadece Altyazıyı Sil"
+                      >
+                        <Trash2 size={11} />
+                      </button>
+                    </div>
                   </div>
+                  <input
+                    type="text"
+                    value={item.sub.text}
+                    oninput={(e) => editor.updateSubtitleText(item.clipId, item.sub.id, (e.target as HTMLInputElement).value)}
+                    class="w-full px-2 py-1 rounded bg-neutral-950 border border-neutral-800 text-xs text-yellow-300 font-medium focus:outline-none focus:border-yellow-500"
+                  />
                 </div>
-                <input
-                  type="text"
-                  value={item.sub.text}
-                  oninput={(e) => editor.updateSubtitleText(item.clipId, item.sub.id, (e.target as HTMLInputElement).value)}
-                  class="w-full px-2 py-1 rounded bg-neutral-950 border border-neutral-800 text-xs text-yellow-300 font-medium focus:outline-none focus:border-yellow-500"
-                />
-              </div>
-            {/each}
-          </div>
+              {/each}
+            </div>
+          {/if}
         {/if}
       </div>
     </Tabs.Content>

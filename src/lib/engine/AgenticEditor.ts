@@ -427,6 +427,52 @@ export class AgenticEditor {
       };
     }
 
+    // 25. Sahne Ayrıştırma / Shot Boundary Detection
+    if (
+      p.includes('sahne') ||
+      p.includes('sahnelere böl') ||
+      p.includes('scene') ||
+      p.includes('çekim ayrıştır') ||
+      p.includes('shot boundary')
+    ) {
+      return {
+        action: 'DETECT_SCENES',
+        confidence: 0.95,
+        description: 'Luma-Histogram delta analizi ile çekim sınırlarını tespit edip videoyu sahnelerine böl'
+      };
+    }
+
+    // 26. Akıllı Ses Kısma / Auto-Ducking
+    if (
+      p.includes('ducking') ||
+      p.includes('müziği kıs') ||
+      p.includes('arkaplan müziği') ||
+      p.includes('ses kısma') ||
+      p.includes('auto duck')
+    ) {
+      return {
+        action: 'AUTO_DUCK_AUDIO',
+        confidence: 0.95,
+        description: 'Konuşma esnasında arka plan müziğinin sesini otomatik kıs (-14dB ducking)'
+      };
+    }
+
+    // 27. Dolgu Kelimeleri Temizleme / Filler Words Pruning (Descript Paradigm)
+    if (
+      p.includes('dolgu') ||
+      p.includes('filler') ||
+      p.includes('şeyleri sil') ||
+      p.includes('ııı') ||
+      p.includes('eee') ||
+      p.includes('duraklama kelimeleri')
+    ) {
+      return {
+        action: 'PRUNE_FILLER_WORDS',
+        confidence: 0.96,
+        description: 'Metindeki tüm "ııı", "eee", "şey", "yani" dolgu kelimelerini videodan manyetik kes'
+      };
+    }
+
     // Fallback: Safe unrecognized prompt notice (never destructively cut up video)
     return {
       action: 'UNKNOWN_INTENT',
@@ -505,6 +551,9 @@ export class AgenticEditor {
       RESET_PROJECT: 'Studio State Orchestrator',
       UNDO: 'Timeline History Engine',
       REDO: 'Timeline History Engine',
+      DETECT_SCENES: 'Fast Luma-Histogram SBD [WebGPU]',
+      AUTO_DUCK_AUDIO: 'Speech-Aware Auto-Ducking [WebAudio]',
+      PRUNE_FILLER_WORDS: 'Descript Speech Tokenizer [WebGPU]',
       UNKNOWN_INTENT: 'AI Command Engine'
     };
 
@@ -827,6 +876,25 @@ export class AgenticEditor {
           editor.activeSidebarTab = 'ai';
           editor.mobileWorkspace = 'ai';
           result = { success: true, message: 'AI Kurgu sekmesi açıldı.' };
+          break;
+        }
+
+        case 'DETECT_SCENES': {
+          const clip = editor.getSelectedClip() || editor.tracks.flatMap(t => t.clips).find(c => c.type === 'video') || editor.ensureSampleVideoClip();
+          const count = await aiService.detectScenes(clip.id);
+          result = { success: true, message: `Video başarıyla analiz edildi ve ${count} farklı sahneye bölündü.` };
+          break;
+        }
+
+        case 'AUTO_DUCK_AUDIO': {
+          const duckRes = await aiService.autoDuckMusic();
+          result = { success: true, message: `${duckRes.duckedClipsCount} müzik klibine akıllı konuşma ducking (-14dB) uygulandı.` };
+          break;
+        }
+
+        case 'PRUNE_FILLER_WORDS': {
+          const count = await aiService.pruneFillerWords();
+          result = { success: true, message: `${count} dolgu kelimesi videodan kesilip temizlendi.` };
           break;
         }
 

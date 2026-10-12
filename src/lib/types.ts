@@ -14,6 +14,7 @@ export interface SubtitleWord {
   word: string;
   start: number;
   end: number;
+  confidence?: number;
 }
 
 export interface SubtitleItem {
@@ -242,7 +243,10 @@ export type AIFeatureId =
   | 'ai_color_enhance'
   | 'ai_audio_denoise'
   | 'ai_script_copilot'
-  | 'ai_smart_template';
+  | 'ai_smart_template'
+  | 'ai_scene_detection'
+  | 'ai_audio_ducking'
+  | 'ai_text_based_edit';
 
 export interface AIFeatureInfo {
   id: AIFeatureId;
@@ -286,6 +290,9 @@ export type AgentActionType =
   | 'RESET_PROJECT'
   | 'UNDO'
   | 'REDO'
+  | 'DETECT_SCENES'
+  | 'AUTO_DUCK_AUDIO'
+  | 'PRUNE_FILLER_WORDS'
   | 'UNKNOWN_INTENT';
 
 export interface AgentIntentResult {

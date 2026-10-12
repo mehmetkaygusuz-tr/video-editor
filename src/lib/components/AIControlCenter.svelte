@@ -19,7 +19,9 @@
     LoaderCircle as Loader2,
     ChevronDown,
     ChevronUp,
-    Trash as Trash2
+    Trash as Trash2,
+    Film,
+    Sliders
   } from '@lucide/svelte';
 
   let ttsInput = $state('Merhaba, yerel yapay zeka ile hazırlanan videoma hoş geldiniz.');
@@ -67,6 +69,14 @@
 
   async function handleReframe() {
     await aiService.autoReframe();
+  }
+
+  async function handleSceneCut() {
+    await aiService.detectScenes();
+  }
+
+  async function handleAudioDucking() {
+    await aiService.autoDuckMusic();
   }
 </script>
 
@@ -338,12 +348,81 @@
                 Yatay çekilmiş 16:9 videodaki konuşmacının yüzünü tespit eder. Titreşimsiz kinematik takip ile konuşmacıyı dikey (9:16) formatının merkezinde tutar.
               </p>
             </div>
+            <div class="flex gap-2">
+              <button
+                onclick={handleReframe}
+                disabled={aiService.isRunning}
+                class="flex-1 py-2 px-3 rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white text-xs font-semibold flex items-center justify-center gap-2 transition-all shadow-md shadow-cyan-950/50 cursor-pointer"
+              >
+                <Crop size={14} /> 9:16 Dikey Akıllı Kadrajı Uygula
+              </button>
+              <button
+                onclick={() => editor.showReframeGuide = !editor.showReframeGuide}
+                class="py-2 px-3 rounded-lg border text-xs font-semibold flex items-center justify-center gap-1.5 transition-all cursor-pointer {editor.showReframeGuide ? 'bg-cyan-950/80 border-cyan-500 text-cyan-300' : 'bg-neutral-800/80 border-neutral-700 text-neutral-300 hover:bg-neutral-700'}"
+                title="Monitörde 9:16 Güvenli Alan Çerçevesi"
+              >
+                {editor.showReframeGuide ? 'Kılavuz Açık' : '9:16 Kılavuz'}
+              </button>
+            </div>
+          </div>
+
+          <!-- 7. Scene Cut Detection (DaVinci/Premiere paradigm) -->
+          <div class="p-4 rounded-xl bg-neutral-900/60 border border-neutral-800/80 hover:border-neutral-700 transition-all flex flex-col justify-between">
+            <div>
+              <div class="flex items-start justify-between mb-2">
+                <div class="flex items-center gap-2.5">
+                  <div class="p-2 rounded-lg bg-indigo-500/15 text-indigo-400 border border-indigo-500/30">
+                    <Film size={18} />
+                  </div>
+                  <div>
+                    <h3 class="text-sm font-bold text-white">Sahne & Çekim Ayrıştırma (Scene Cut)</h3>
+                    <span class="text-[10px] text-indigo-400 font-mono">Fast Luma-Histogram SBD</span>
+                  </div>
+                </div>
+                <span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-neutral-800 text-indigo-300 border border-indigo-500/20">
+                  MIT
+                </span>
+              </div>
+              <p class="text-xs text-neutral-400 mb-4">
+                Kamera açısı değişimlerini ve sert kesimleri piksel delta analiziyle yakalayarak videoyu bağımsız sahnelere otomatik böler.
+              </p>
+            </div>
             <button
-              onclick={handleReframe}
+              onclick={handleSceneCut}
               disabled={aiService.isRunning}
-              class="w-full py-2 px-3 rounded-lg bg-cyan-600 hover:bg-cyan-500 disabled:opacity-50 text-white text-xs font-semibold flex items-center justify-center gap-2 transition-all shadow-md shadow-cyan-950/50 cursor-pointer"
+              class="w-full py-2 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-50 text-white text-xs font-semibold flex items-center justify-center gap-2 transition-all shadow-md shadow-indigo-950/50 cursor-pointer"
             >
-              <Crop size={14} /> 9:16 Dikey Akıllı Kadrajı Uygula
+              <Film size={14} /> Sahneleri Tespit Et ve Böl
+            </button>
+          </div>
+
+          <!-- 8. Smart Audio Ducking -->
+          <div class="p-4 rounded-xl bg-neutral-900/60 border border-neutral-800/80 hover:border-neutral-700 transition-all flex flex-col justify-between">
+            <div>
+              <div class="flex items-start justify-between mb-2">
+                <div class="flex items-center gap-2.5">
+                  <div class="p-2 rounded-lg bg-violet-500/15 text-violet-400 border border-violet-500/30">
+                    <Sliders size={18} />
+                  </div>
+                  <div>
+                    <h3 class="text-sm font-bold text-white">Akıllı Ses Kısma (Smart Ducking)</h3>
+                    <span class="text-[10px] text-violet-400 font-mono">Speech-Aware Auto-Ducking</span>
+                  </div>
+                </div>
+                <span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-neutral-800 text-violet-300 border border-violet-500/20">
+                  MIT
+                </span>
+              </div>
+              <p class="text-xs text-neutral-400 mb-4">
+                Konuşmacı başladığında müzik sesini otomatik -14dB kısar; konuşma bittiğinde yumuşak rampa ile tekrar yükseltir.
+              </p>
+            </div>
+            <button
+              onclick={handleAudioDucking}
+              disabled={aiService.isRunning}
+              class="w-full py-2 px-3 rounded-lg bg-violet-600 hover:bg-violet-500 disabled:opacity-50 text-white text-xs font-semibold flex items-center justify-center gap-2 transition-all shadow-md shadow-violet-950/50 cursor-pointer"
+            >
+              <Sliders size={14} /> Otomatik Müzik Ducking Uygula
             </button>
           </div>
 
