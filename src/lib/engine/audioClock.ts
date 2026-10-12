@@ -292,32 +292,75 @@ export class MasterAudioClock {
         source.detune.value = pitchShift * 100;
       }
 
+      // Calculate timing parameters
+      let when = currentAudioNow;
+      let offset = clip.sourceOffset || 0;
+      let duration = clip.duration;
+
+      const isFutureClip = currentTimeline < clip.startAt;
+      if (!isFutureClip) {
+        // Clip is already playing
+        const timeIntoClip = (currentTimeline - clip.startAt) * currentSpeed;
+        offset += timeIntoClip;
+        duration = Math.max(0, clip.duration - (currentTimeline - clip.startAt));
+        when = currentAudioNow;
+      } else {
+        // Clip starts in the future
+        const delayTimeline = (clip.startAt - currentTimeline) / this.playbackRate;
+        when = currentAudioNow + delayTimeline;
+      }
+
       // Dedicated GainNode for sample-accurate volume automation & envelope
       const gainNode = ctx.createGain();
+      const baseVolume = Math.max(0, Math.min(2.0, clip.volume ?? 1.0));
+      const duckingFactor = (clip.audioEnvelope?.ducking && isSpeechActive) ? 0.25 : 1.0;
+      const nominalGain = Math.max(0.0001, baseVolume * duckingFactor);
 
-      // Envelope calculation based on current exact timeline position
-      let envelopeMultiplier = 1.0;
-      const fadeInSec = clip.audioEnvelope?.fadeIn ?? 0;
-      const fadeOutSec = clip.audioEnvelope?.fadeOut ?? 0;
-      const remainingSec = clip.duration - elapsed;
+      const fadeInSec = Math.max(0, clip.audioEnvelope?.fadeIn ?? 0);
+      const fadeOutSec = Math.max(0, clip.audioEnvelope?.fadeOut ?? 0);
 
-      if (fadeInSec > 0 && elapsed < fadeInSec) {
-        envelopeMultiplier *= Math.max(0, elapsed / fadeInSec);
+      if (isFutureClip) {
+        // Future clip: strictly automate gain starting at 'when'
+        gainNode.gain.setValueAtTime(0.0001, when);
+        if (fadeInSec > 0) {
+          gainNode.gain.linearRampToValueAtTime(nominalGain, when + fadeInSec);
+        } else {
+          gainNode.gain.linearRampToValueAtTime(nominalGain, when + 0.005);
+        }
+
+        if (fadeOutSec > 0 && duration > fadeOutSec) {
+          const fadeOutStart = when + duration - fadeOutSec;
+          gainNode.gain.setValueAtTime(nominalGain, fadeOutStart);
+          gainNode.gain.linearRampToValueAtTime(0.0001, when + duration);
+        }
+      } else {
+        // Mid-playback clip: account for elapsed timeline progress
+        const elapsedSec = Math.max(0, currentTimeline - clip.startAt);
+        const remainingSec = Math.max(0, clip.duration - elapsedSec);
+
+        let initialGain = nominalGain;
+        if (fadeInSec > 0 && elapsedSec < fadeInSec) {
+          initialGain = nominalGain * (elapsedSec / fadeInSec);
+        }
+        if (fadeOutSec > 0 && remainingSec < fadeOutSec) {
+          initialGain = nominalGain * (remainingSec / fadeOutSec);
+        }
+        initialGain = Math.max(0.0001, initialGain);
+
+        gainNode.gain.setValueAtTime(initialGain, currentAudioNow);
+
+        if (fadeInSec > 0 && elapsedSec < fadeInSec) {
+          gainNode.gain.linearRampToValueAtTime(nominalGain, currentAudioNow + (fadeInSec - elapsedSec));
+        }
+
+        if (fadeOutSec > 0 && remainingSec > fadeOutSec) {
+          const fadeOutStart = currentAudioNow + (remainingSec - fadeOutSec);
+          gainNode.gain.setValueAtTime(nominalGain, fadeOutStart);
+          gainNode.gain.linearRampToValueAtTime(0.0001, currentAudioNow + remainingSec);
+        } else if (fadeOutSec > 0 && remainingSec <= fadeOutSec) {
+          gainNode.gain.linearRampToValueAtTime(0.0001, currentAudioNow + remainingSec);
+        }
       }
-      if (fadeOutSec > 0 && remainingSec < fadeOutSec) {
-        envelopeMultiplier *= Math.max(0, remainingSec / fadeOutSec);
-      }
-
-      // Auto-ducking: -12dB if ducking active
-      if (clip.audioEnvelope?.ducking && isSpeechActive) {
-        envelopeMultiplier *= 0.25;
-      }
-
-      const targetGain = Math.max(0, Math.min(2.0, (clip.volume ?? 1.0) * envelopeMultiplier));
-
-      // Click/Pop-Free Envelope: 4ms micro-fade in
-      gainNode.gain.setValueAtTime(0.0001, currentAudioNow);
-      gainNode.gain.linearRampToValueAtTime(targetGain, currentAudioNow + 0.004);
 
       // Connect DSP chain: Source -> EQ Filter (if set) -> Gain -> Destination
       let lastNode: AudioNode = source;
@@ -347,22 +390,6 @@ export class MasterAudioClock {
 
       lastNode.connect(gainNode);
       gainNode.connect(ctx.destination);
-
-      let when = currentAudioNow;
-      let offset = clip.sourceOffset || 0;
-      let duration = clip.duration;
-
-      if (currentTimeline >= clip.startAt) {
-        // Clip is already playing
-        const timeIntoClip = (currentTimeline - clip.startAt) * currentSpeed;
-        offset += timeIntoClip;
-        duration = Math.max(0, clip.duration - (currentTimeline - clip.startAt));
-        when = currentAudioNow;
-      } else {
-        // Clip starts in the future
-        const delayTimeline = (clip.startAt - currentTimeline) / this.playbackRate;
-        when = currentAudioNow + delayTimeline;
-      }
 
       // Validate offset & duration within buffer limits
       if (offset < buffer.duration && duration > 0) {
@@ -513,7 +540,10 @@ export class MasterAudioClock {
           // Fallback to standard Web Audio decodeAudioData if container is audio-only or unsupported
         }
 
-        // 2. Fallback: native Web Audio decodeAudioData
+        // 2. Fallback: native Web Audio decodeAudioData (guarded against > 250MB OOM)
+        if (file.size > 250 * 1024 * 1024) {
+          throw new Error('Dosya boyutu doğrudan Web Audio çözümü için çok büyük (>250MB).');
+        }
         const arrayBuf = await file.arrayBuffer();
         const decoded = await ctx.decodeAudioData(arrayBuf);
         this.audioBufferCache.set(cacheKey, decoded);

@@ -20,7 +20,7 @@ export class EngineOrchestrator {
     #aiMessageListeners: ((data: any) => void)[] = [];
     #mediaMessageListeners: ((data: any) => void)[] = [];
     #decoderMap = new Map<string, VideoDecoderWrapper>();
-    #loadingFiles = new Set<string>();
+    #loadingPromises = new Map<string, Promise<VideoDecoderWrapper | null>>();
     #videoElementCache = new Map<string, HTMLVideoElement>();
 
     // SAB Synchronization (with fallback)
@@ -79,8 +79,8 @@ export class EngineOrchestrator {
 
     resizeCanvas(width: number, height: number) {
         if (this.#canvas) {
-            this.#canvas.width = width;
-            this.#canvas.height = height;
+            if (this.#canvas.width !== width) this.#canvas.width = width;
+            if (this.#canvas.height !== height) this.#canvas.height = height;
         }
     }
 
@@ -187,25 +187,34 @@ export class EngineOrchestrator {
     }
 
     async preloadClip(file: File): Promise<void> {
-        if (!file || this.#decoderMap.has(file.name) || this.#loadingFiles.has(file.name)) return;
-        this.#loadingFiles.add(file.name);
-        try {
-            const newDecoder = new VideoDecoderWrapper();
-            await newDecoder.load(file);
-            if (this.#decoderMap.size >= MAX_ACTIVE_DECODERS) {
-                const oldestKey = this.#decoderMap.keys().next().value;
-                if (oldestKey) {
-                    const oldDecoder = this.#decoderMap.get(oldestKey);
-                    try { oldDecoder?.stopStreaming(); oldDecoder?.dispose(); } catch (_) {}
-                    this.#decoderMap.delete(oldestKey);
-                }
-            }
-            this.#decoderMap.set(file.name, newDecoder);
-        } catch (err) {
-            console.warn('[Orchestrator] Preload clip failed:', err);
-        } finally {
-            this.#loadingFiles.delete(file.name);
+        if (!file || this.#decoderMap.has(file.name)) return;
+        if (this.#loadingPromises.has(file.name)) {
+            await this.#loadingPromises.get(file.name);
+            return;
         }
+        const promise = (async () => {
+            try {
+                const newDecoder = new VideoDecoderWrapper();
+                await newDecoder.load(file);
+                if (this.#decoderMap.size >= MAX_ACTIVE_DECODERS) {
+                    const oldestKey = this.#decoderMap.keys().next().value;
+                    if (oldestKey) {
+                        const oldDecoder = this.#decoderMap.get(oldestKey);
+                        try { oldDecoder?.stopStreaming(); oldDecoder?.dispose(); } catch (_) {}
+                        this.#decoderMap.delete(oldestKey);
+                    }
+                }
+                this.#decoderMap.set(file.name, newDecoder);
+                return newDecoder;
+            } catch (err) {
+                console.warn('[Orchestrator] Preload clip failed:', err);
+                return null;
+            } finally {
+                this.#loadingPromises.delete(file.name);
+            }
+        })();
+        this.#loadingPromises.set(file.name, promise);
+        await promise;
     }
 
     async seekFrame(file: File, timeInSeconds: number, colorGrading?: any, options?: SeekOptions) {
@@ -294,6 +303,7 @@ export class EngineOrchestrator {
     }
 
     clearMediaCache() {
+        this.#loadingPromises.clear();
         this.#decoderMap.forEach(d => {
             try { d.stopStreaming(); d.dispose(); } catch (_) {}
         });
@@ -313,6 +323,7 @@ export class EngineOrchestrator {
     }
 
     removeAsset(fileName: string) {
+        this.#loadingPromises.delete(fileName);
         const dec = this.#decoderMap.get(fileName);
         if (dec) {
             try { dec.stopStreaming(); dec.dispose(); } catch (_) {}
@@ -348,28 +359,33 @@ export class EngineOrchestrator {
         const getSource = async (info: { file: File, time: number, grading?: any }): Promise<{ type: 'frame', frame: VideoFrame } | { type: 'video', video: HTMLVideoElement } | null> => {
             let decoder = this.#decoderMap.get(info.file.name);
             if (!decoder) {
-                if (this.#loadingFiles.has(info.file.name)) return null;
-                this.#loadingFiles.add(info.file.name);
-                
-                const newDecoder = new VideoDecoderWrapper();
-                try {
-                    await newDecoder.load(info.file);
-                    // Mobile WebCodecs hardware limit: evict LRU decoder if >= MAX_ACTIVE_DECODERS
-                    if (this.#decoderMap.size >= MAX_ACTIVE_DECODERS) {
-                        const oldestKey = this.#decoderMap.keys().next().value;
-                        if (oldestKey) {
-                            const oldDecoder = this.#decoderMap.get(oldestKey);
-                            try { oldDecoder?.stopStreaming(); oldDecoder?.dispose(); } catch (_) {}
-                            this.#decoderMap.delete(oldestKey);
+                let loadPromise = this.#loadingPromises.get(info.file.name);
+                if (!loadPromise) {
+                    loadPromise = (async () => {
+                        try {
+                            const newDecoder = new VideoDecoderWrapper();
+                            await newDecoder.load(info.file);
+                            if (this.#decoderMap.size >= MAX_ACTIVE_DECODERS) {
+                                const oldestKey = this.#decoderMap.keys().next().value;
+                                if (oldestKey) {
+                                    const oldDecoder = this.#decoderMap.get(oldestKey);
+                                    try { oldDecoder?.stopStreaming(); oldDecoder?.dispose(); } catch (_) {}
+                                    this.#decoderMap.delete(oldestKey);
+                                }
+                            }
+                            this.#decoderMap.set(info.file.name, newDecoder);
+                            return newDecoder;
+                        } catch (err) {
+                            console.warn('[Orchestrator] Mediabunny load error, using native fallback:', err);
+                            return null;
+                        } finally {
+                            this.#loadingPromises.delete(info.file.name);
                         }
-                    }
-                    this.#decoderMap.set(info.file.name, newDecoder);
-                    decoder = newDecoder;
-                } catch (err) {
-                    console.warn('[Orchestrator] Mediabunny load error, using native fallback:', err);
-                } finally {
-                    this.#loadingFiles.delete(info.file.name);
+                    })();
+                    this.#loadingPromises.set(info.file.name, loadPromise);
                 }
+                const loaded = await loadPromise;
+                if (loaded) decoder = loaded;
             } else {
                 // Refresh LRU position in Map
                 this.#decoderMap.delete(info.file.name);

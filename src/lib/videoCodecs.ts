@@ -50,7 +50,7 @@ export class VideoDecoderWrapper implements IDecoderEngine {
   private _streamCancelToken: { cancelled: boolean } | null = null;
   private _streamActive = false;
   private _isStreamFilling = false;
-  private readonly MAX_RING_BUFFER = 24;
+  private readonly MAX_RING_BUFFER = 60;
   
   // Telemetry
   private _lastPTS = 0;
@@ -318,11 +318,15 @@ export class VideoDecoderWrapper implements IDecoderEngine {
 
       // Cache keyframes into LRU cache for 0ms future scrubbing
       if (isKey) {
-        if (this._keyframeCache.size >= this.MAX_CACHE_FRAMES) {
+        if (this._keyframeCache.has(nearestKey)) {
+          const old = this._keyframeCache.get(nearestKey);
+          try { old?.close(); } catch {}
+          this._keyframeCache.delete(nearestKey);
+        } else if (this._keyframeCache.size >= this.MAX_CACHE_FRAMES) {
           const oldestKey = this._keyframeCache.keys().next().value;
           if (oldestKey !== undefined) {
             const evicted = this._keyframeCache.get(oldestKey);
-            evicted?.close();
+            try { evicted?.close(); } catch {}
             this._keyframeCache.delete(oldestKey);
           }
         }
@@ -331,11 +335,15 @@ export class VideoDecoderWrapper implements IDecoderEngine {
 
       // Cache recent exact frames for 0ms scrubbing
       if (!isFastKeyframeMode) {
-        if (this._recentFrameCache.size >= this.MAX_RECENT_FRAMES) {
+        if (this._recentFrameCache.has(samplePTS)) {
+          const old = this._recentFrameCache.get(samplePTS);
+          try { old?.close(); } catch {}
+          this._recentFrameCache.delete(samplePTS);
+        } else if (this._recentFrameCache.size >= this.MAX_RECENT_FRAMES) {
           const oldest = this._recentFrameCache.keys().next().value;
           if (oldest !== undefined) {
             const evicted = this._recentFrameCache.get(oldest);
-            try { evicted?.close(); } catch (_) {}
+            try { evicted?.close(); } catch {}
             this._recentFrameCache.delete(oldest);
           }
         }
@@ -377,8 +385,8 @@ export class VideoDecoderWrapper implements IDecoderEngine {
     const bufferTailPTS = hasBuffer ? this._streamBuffer[this._streamBuffer.length - 1].pts : 0;
 
     const isOutOfBufferRange = !hasBuffer || 
-      targetTime < bufferHeadPTS - 0.25 || 
-      targetTime > bufferTailPTS + 0.8;
+      targetTime < bufferHeadPTS - 0.5 || 
+      targetTime > bufferTailPTS + 1.2;
 
     if (!this._streamActive || isOutOfBufferRange) {
       this.stopStreaming();

@@ -600,6 +600,8 @@
       if (playLoopId) cancelAnimationFrame(playLoopId);
       window.removeEventListener('pointerdown', unlockAudio);
       window.removeEventListener('touchstart', unlockAudio);
+      engine.destroy();
+      masterAudioClock.dispose();
     };
   });
 
