@@ -320,7 +320,8 @@ export class Exporter {
     assetMap: Map<string, File>
   ) {
     const relTime = currentTime - clip.startAt;
-    const speed = clip.speed ?? 1.0;
+    const normT = Math.max(0, Math.min(1, clip.duration > 0 ? relTime / clip.duration : 0));
+    const speed = clip.speedCurve ? evaluateSpeedCurve(clip.speedCurve, normT) : (clip.speed ?? 1.0);
     const srcTime = (clip.sourceOffset || 0) + relTime * speed;
 
     let frameRendered = false;
@@ -524,18 +525,71 @@ export class Exporter {
           const sourceNode = offlineCtx.createBufferSource();
           sourceNode.buffer = clipAudioBuffer;
 
-          const gainNode = offlineCtx.createGain();
-          gainNode.gain.value = clip.volume ?? 1.0;
 
-          sourceNode.connect(gainNode);
-          gainNode.connect(offlineCtx.destination);
+
+          // Pitch shift
+          const pitchShift = clip.audioEnvelope?.pitchShift ?? 0;
+          if (pitchShift !== 0) {
+            sourceNode.detune.value = pitchShift * 100;
+          }
+
+          let lastNode: AudioNode = sourceNode;
+          const eqPreset = clip.audioEnvelope?.eqPreset;
+          if (eqPreset && eqPreset !== 'flat') {
+            const eqFilter = offlineCtx.createBiquadFilter();
+            if (eqPreset === 'voice-boost') {
+              eqFilter.type = 'peaking';
+              eqFilter.frequency.value = 2800;
+              eqFilter.Q.value = 1.0;
+              eqFilter.gain.value = 4.5;
+            } else if (eqPreset === 'bass-boost') {
+              eqFilter.type = 'lowshelf';
+              eqFilter.frequency.value = 120;
+              eqFilter.gain.value = 5.0;
+            } else if (eqPreset === 'podcast') {
+              eqFilter.type = 'peaking';
+              eqFilter.frequency.value = 3200;
+              eqFilter.Q.value = 1.2;
+              eqFilter.gain.value = 3.5;
+            }
+            lastNode.connect(eqFilter);
+            lastNode = eqFilter;
+          }
+
+          const gainNode = offlineCtx.createGain();
+          const baseGain = clip.volume ?? 1.0;
 
           const destStartTime = overlapStart - startSec;
-          const clipLocalTime = overlapStart - clipStart;
+          const rawElapsed = overlapStart - clipStart;
+          const normT = Math.max(0, Math.min(1, clip.duration > 0 ? rawElapsed / clip.duration : 0));
+          const currentSpeed = clip.speedCurve ? evaluateSpeedCurve(clip.speedCurve, normT) : (clip.speed ?? 1.0);
+          sourceNode.playbackRate.value = currentSpeed;
+          const clipLocalTime = rawElapsed * currentSpeed;
           const sourceOffset = (clip.sourceOffset || 0) + clipLocalTime;
-          const playDuration = overlapEnd - overlapStart;
+          const playDuration = (overlapEnd - overlapStart) * currentSpeed;
           const availableBufferDuration = Math.max(0, clipAudioBuffer.duration - sourceOffset);
           const finalDuration = Math.min(playDuration, availableBufferDuration);
+
+          // Audio envelope automation: fadeIn / fadeOut
+          const fadeInSec = clip.audioEnvelope?.fadeIn ?? 0;
+          const fadeOutSec = clip.audioEnvelope?.fadeOut ?? 0;
+
+          if (fadeInSec > 0 && clipLocalTime < fadeInSec) {
+            gainNode.gain.setValueAtTime(0.0001, destStartTime);
+            gainNode.gain.linearRampToValueAtTime(baseGain, destStartTime + Math.min(fadeInSec - clipLocalTime, finalDuration));
+          } else {
+            gainNode.gain.setValueAtTime(baseGain, destStartTime);
+          }
+
+          if (fadeOutSec > 0 && (clip.duration - (clipLocalTime + finalDuration)) < fadeOutSec) {
+            const fadeStartInClip = Math.max(clipLocalTime, clip.duration - fadeOutSec);
+            const fadeStartOnTimeline = destStartTime + (fadeStartInClip - clipLocalTime);
+            gainNode.gain.setValueAtTime(baseGain, fadeStartOnTimeline);
+            gainNode.gain.linearRampToValueAtTime(0.0001, destStartTime + finalDuration);
+          }
+
+          lastNode.connect(gainNode);
+          gainNode.connect(offlineCtx.destination);
 
           if (finalDuration > 0) {
             sourceNode.start(destStartTime, sourceOffset, finalDuration);

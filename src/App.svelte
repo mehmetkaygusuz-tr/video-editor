@@ -6,6 +6,7 @@
   import { ensureAudioUnlocked } from './lib/audio';
   import { masterAudioClock } from './lib/engine/audioClock';
   import { getFileFromOPFS, saveFileToOPFS } from './lib/opfs';
+  import { evaluateSpeedCurve } from './lib/engine/speedCurve';
   import { engine } from './lib/engine/orchestrator.svelte';
   import { engineState } from './lib/engine/engineState.svelte';
   import { aiService } from './lib/engine/aiService.svelte';
@@ -395,15 +396,19 @@
     }
 
     if (topClip) {
-      const speed1 = topClip.speed ?? 1.0;
-      const targetTime1 = (topClip.sourceOffset || 0) + (videoPTS - topClip.startAt) * speed1;
+      const relTime1 = videoPTS - topClip.startAt;
+      const normT1 = Math.max(0, Math.min(1, topClip.duration > 0 ? relTime1 / topClip.duration : 0));
+      const speed1 = topClip.speedCurve ? evaluateSpeedCurve(topClip.speedCurve, normT1) : (topClip.speed ?? 1.0);
+      const targetTime1 = (topClip.sourceOffset || 0) + relTime1 * speed1;
 
       let targetTime2 = 0;
       let transition: { type: string; progress: number } | null = null;
 
       if (bottomClip) {
-        const speed2 = bottomClip.speed ?? 1.0;
-        targetTime2 = (bottomClip.sourceOffset || 0) + (videoPTS - bottomClip.startAt) * speed2;
+        const relTime2 = videoPTS - bottomClip.startAt;
+        const normT2 = Math.max(0, Math.min(1, bottomClip.duration > 0 ? relTime2 / bottomClip.duration : 0));
+        const speed2 = bottomClip.speedCurve ? evaluateSpeedCurve(bottomClip.speedCurve, normT2) : (bottomClip.speed ?? 1.0);
+        targetTime2 = (bottomClip.sourceOffset || 0) + relTime2 * speed2;
         if (topClip.transitionIn && videoPTS < topClip.startAt + topClip.transitionIn.duration) {
           const p = (videoPTS - topClip.startAt) / topClip.transitionIn.duration;
           transition = { type: topClip.transitionIn.type, progress: Math.max(0, Math.min(1, p)) };

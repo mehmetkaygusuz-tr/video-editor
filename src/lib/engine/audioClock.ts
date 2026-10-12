@@ -17,6 +17,7 @@ export class MasterAudioClock {
   private activeSources = new Map<string, {
     source: AudioBufferSourceNode;
     gain: GainNode;
+    filter?: BiquadFilterNode;
     clipId: string;
   }>();
 
@@ -280,15 +281,22 @@ export class MasterAudioClock {
       const source = ctx.createBufferSource();
       source.buffer = buffer;
 
-      // Pitch-preserving speed setting
-      const currentSpeed = clip.speed ?? 1.0;
+      // Pitch-preserving speed setting with speed curve support
+      const elapsed = Math.max(0, currentTimeline - clip.startAt);
+      const normT = Math.max(0, Math.min(1, clip.duration > 0 ? elapsed / clip.duration : 0));
+      const currentSpeed = clip.speedCurve ? evaluateSpeedCurve(clip.speedCurve, normT) : (clip.speed ?? 1.0);
       source.playbackRate.value = currentSpeed * this.playbackRate;
+
+      // Pitch shift via Web Audio detune (cents = semitones * 100)
+      const pitchShift = clip.audioEnvelope?.pitchShift ?? 0;
+      if (pitchShift !== 0) {
+        source.detune.value = pitchShift * 100;
+      }
 
       // Dedicated GainNode for sample-accurate volume automation & envelope
       const gainNode = ctx.createGain();
 
       // Envelope calculation based on current exact timeline position
-      const elapsed = Math.max(0, currentTimeline - clip.startAt);
       let envelopeMultiplier = 1.0;
       const fadeInSec = clip.audioEnvelope?.fadeIn ?? 0;
       const fadeOutSec = clip.audioEnvelope?.fadeOut ?? 0;
@@ -312,7 +320,33 @@ export class MasterAudioClock {
       gainNode.gain.setValueAtTime(0.0001, currentAudioNow);
       gainNode.gain.linearRampToValueAtTime(targetGain, currentAudioNow + 0.004);
 
-      source.connect(gainNode);
+      // Connect DSP chain: Source -> EQ Filter (if set) -> Gain -> Destination
+      let lastNode: AudioNode = source;
+      let filterNode: BiquadFilterNode | undefined = undefined;
+      const eqPreset = clip.audioEnvelope?.eqPreset;
+
+      if (eqPreset && eqPreset !== 'flat') {
+        filterNode = ctx.createBiquadFilter();
+        if (eqPreset === 'voice-boost') {
+          filterNode.type = 'peaking';
+          filterNode.frequency.value = 2800;
+          filterNode.Q.value = 1.0;
+          filterNode.gain.value = 4.5;
+        } else if (eqPreset === 'bass-boost') {
+          filterNode.type = 'lowshelf';
+          filterNode.frequency.value = 120;
+          filterNode.gain.value = 5.0;
+        } else if (eqPreset === 'podcast') {
+          filterNode.type = 'peaking';
+          filterNode.frequency.value = 3200;
+          filterNode.Q.value = 1.2;
+          filterNode.gain.value = 3.5;
+        }
+        lastNode.connect(filterNode);
+        lastNode = filterNode;
+      }
+
+      lastNode.connect(gainNode);
       gainNode.connect(ctx.destination);
 
       let when = currentAudioNow;
@@ -337,11 +371,12 @@ export class MasterAudioClock {
         source.start(when, offset, safeDuration);
 
         const nodeKey = `${clip.id}_${Date.now()}`;
-        this.activeSources.set(nodeKey, { source, gain: gainNode, clipId: clip.id });
+        this.activeSources.set(nodeKey, { source, gain: gainNode, filter: filterNode, clipId: clip.id });
 
         source.onended = () => {
           try {
             source.disconnect();
+            filterNode?.disconnect();
             gainNode.disconnect();
           } catch (_) {}
           this.activeSources.delete(nodeKey);
@@ -374,6 +409,7 @@ export class MasterAudioClock {
         setTimeout(() => {
           try {
             item.source.disconnect();
+            item.filter?.disconnect();
             item.gain.disconnect();
           } catch (_) {}
         }, 20);
@@ -381,6 +417,7 @@ export class MasterAudioClock {
         try { item.source.stop(); } catch (__) {}
         try {
           item.source.disconnect();
+          item.filter?.disconnect();
           item.gain.disconnect();
         } catch (___) {}
       }
