@@ -20,7 +20,7 @@ import { engine } from './orchestrator.svelte';
 import { masterAudioClock } from './audioClock';
 
 export interface ExportOptions {
-  preset: 'tiktok_9_16' | 'youtube_16_9' | 'square_1_1';
+  preset: 'tiktok_9_16' | 'youtube_16_9' | 'square_1_1' | 'cinematic_21_9' | 'original';
   fps?: number;
   format?: 'mp4' | 'webm';
   quality?: 'high' | 'medium';
@@ -58,7 +58,7 @@ export class Exporter {
 
     onProgress(1, 'Donanım kodlayıcı ve proje parametreleri hazırlanıyor...');
 
-    // Determine dimensions based on preset (ensuring even pixel dimensions for H.264)
+    // Determine dimensions based on preset (ensuring even pixel dimensions for H.264/AVC)
     let width = 1080;
     let height = 1920;
     if (preset === 'youtube_16_9') {
@@ -67,7 +67,17 @@ export class Exporter {
     } else if (preset === 'square_1_1') {
       width = 1080;
       height = 1080;
+    } else if (preset === 'cinematic_21_9') {
+      width = 2560;
+      height = 1080;
+    } else if (preset === 'original') {
+      width = editor.originalWidth || 1920;
+      height = editor.originalHeight || 1080;
     }
+
+    // Hardware encoders mandate even dimensions
+    width = Math.round(width / 2) * 2;
+    height = Math.round(height / 2) * 2;
 
     const allClips = editor.tracks.flatMap(t => t.clips);
     let totalDuration = 0;
@@ -127,7 +137,6 @@ export class Exporter {
 
     // 3. Audio Mixing Pipeline via OfflineAudioContext
     onProgress(4, 'Zaman çizgisi sesleri çok hızlı miksleniyor (Faster-Than-Realtime)...');
-    let hasAudioTrack = false;
     try {
       const mixedAudioBuffer = await this.mixTimelineAudio(totalDuration, startSec, durationToExport);
       if (mixedAudioBuffer && mixedAudioBuffer.length > 0) {
@@ -138,7 +147,6 @@ export class Exporter {
         });
         output.addAudioTrack(audioSource);
         await audioSource.add(mixedAudioBuffer);
-        hasAudioTrack = true;
       }
     } catch (audioErr) {
       console.warn('[Exporter] Audio mix warning, continuing with video only:', audioErr);
@@ -160,11 +168,23 @@ export class Exporter {
         try {
           const resp = await fetch(asset.blobUrl);
           const blob = await resp.blob();
-          f = new File([blob], asset.name, { type: asset.type === 'video' ? 'video/mp4' : 'audio/mp3' });
+          const mime = asset.type === 'video' ? 'video/mp4' : asset.type === 'image' ? (asset.name.endsWith('.png') ? 'image/png' : 'image/jpeg') : 'audio/mp3';
+          f = new File([blob], asset.name, { type: mime });
           editor.setCachedFile(asset.name, f);
         } catch (_) {}
       }
       if (f) assetMap.set(asset.id, f);
+    }
+
+    // Cache static images as ImageBitmaps for 0ms render latency
+    const imageBitmapCache = new Map<string, ImageBitmap>();
+    for (const [id, file] of assetMap.entries()) {
+      if (file.type.startsWith('image/')) {
+        try {
+          const bmp = await createImageBitmap(file);
+          imageBitmapCache.set(id, bmp);
+        } catch (_) {}
+      }
     }
 
     // Pre-warm video decoders for all video assets in the timeline to guarantee 0ms latency
@@ -174,7 +194,7 @@ export class Exporter {
         const file = assetMap.get(asset.id);
         if (file) {
           try {
-            await engine.seekFrameWithTransition({ file, time: 0 }, null, null, { mode: 'exact' });
+            await engine.preloadClip(file);
           } catch (_) {}
         }
       }
@@ -197,15 +217,16 @@ export class Exporter {
         ctx.fillStyle = '#000000';
         ctx.fillRect(0, 0, width, height);
 
-        // Find active clips at current timestamp
+        // Find active visual clips at current timestamp (supporting video, image, and visual tracks)
+        const isVisualClip = (c: TimelineClip) => c.type === 'video' || c.type === 'image' || (!c.type && !c.trackId?.startsWith('A'));
         let activeVideoClips = allClips
-          .filter(c => c.type === 'video' && t >= c.startAt && t < c.startAt + c.duration)
+          .filter(c => isVisualClip(c) && t >= c.startAt && t < c.startAt + c.duration)
           .sort((a, b) => a.startAt - b.startAt);
 
         // Subframe cut boundary tolerance: prevents 1-frame micro-blackouts between adjacent cuts
         if (activeVideoClips.length === 0) {
           activeVideoClips = allClips
-            .filter(c => c.type === 'video' && t >= (c.startAt - dt * 0.75) && t <= (c.startAt + c.duration + dt * 0.75))
+            .filter(c => isVisualClip(c) && t >= (c.startAt - dt * 0.75) && t <= (c.startAt + c.duration + dt * 0.75))
             .sort((a, b) => a.startAt - b.startAt);
         }
 
@@ -225,35 +246,97 @@ export class Exporter {
             }
           }
 
-          // Draw clips (bottom first, then top with transition alpha/wipe)
+          // Draw clips with transitions (dissolve, fade-to-black, wipe-left, wipe-right)
           if (bottomClip && transition && transition.progress > 0) {
-            await this.renderClipToCanvas(ctx, bottomClip, t, width, height, assetMap);
-            ctx.save();
-            ctx.globalAlpha = transition.progress;
-            await this.renderClipToCanvas(ctx, topClip, t, width, height, assetMap);
-            ctx.restore();
+            const p = Math.max(0, Math.min(1, transition.progress));
+            const type = transition.type || 'cross-dissolve';
+
+            if (type === 'fade-to-black' || type === 'fade') {
+              if (p < 0.5) {
+                ctx.fillStyle = '#000000';
+                ctx.fillRect(0, 0, width, height);
+                ctx.save();
+                ctx.globalAlpha = 1.0 - p * 2;
+                await this.renderClipToCanvas(ctx, bottomClip, t, width, height, assetMap, imageBitmapCache);
+                ctx.restore();
+              } else {
+                ctx.fillStyle = '#000000';
+                ctx.fillRect(0, 0, width, height);
+                ctx.save();
+                ctx.globalAlpha = (p - 0.5) * 2;
+                await this.renderClipToCanvas(ctx, topClip, t, width, height, assetMap, imageBitmapCache);
+                ctx.restore();
+              }
+            } else if (type === 'wipe-left') {
+              await this.renderClipToCanvas(ctx, bottomClip, t, width, height, assetMap, imageBitmapCache);
+              ctx.save();
+              ctx.beginPath();
+              ctx.rect(0, 0, width * p, height);
+              ctx.clip();
+              await this.renderClipToCanvas(ctx, topClip, t, width, height, assetMap, imageBitmapCache);
+              ctx.restore();
+            } else if (type === 'wipe-right') {
+              await this.renderClipToCanvas(ctx, bottomClip, t, width, height, assetMap, imageBitmapCache);
+              ctx.save();
+              ctx.beginPath();
+              ctx.rect(width * (1 - p), 0, width * p, height);
+              ctx.clip();
+              await this.renderClipToCanvas(ctx, topClip, t, width, height, assetMap, imageBitmapCache);
+              ctx.restore();
+            } else {
+              // Dissolve / cross-dissolve
+              await this.renderClipToCanvas(ctx, bottomClip, t, width, height, assetMap, imageBitmapCache);
+              ctx.save();
+              ctx.globalAlpha = p;
+              await this.renderClipToCanvas(ctx, topClip, t, width, height, assetMap, imageBitmapCache);
+              ctx.restore();
+            }
           } else if (!bottomClip && topClip.transitionIn && t < topClip.startAt + topClip.transitionIn.duration && topClip.transitionIn.type === 'fade') {
             const p = Math.max(0, Math.min(1, (t - topClip.startAt) / topClip.transitionIn.duration));
             ctx.save();
             ctx.globalAlpha = p;
-            await this.renderClipToCanvas(ctx, topClip, t, width, height, assetMap);
+            await this.renderClipToCanvas(ctx, topClip, t, width, height, assetMap, imageBitmapCache);
             ctx.restore();
           } else if (!bottomClip && topClip.transitionOut && t > topClip.startAt + topClip.duration - topClip.transitionOut.duration && topClip.transitionOut.type === 'fade') {
             const p = Math.max(0, Math.min(1, (topClip.startAt + topClip.duration - t) / topClip.transitionOut.duration));
             ctx.save();
             ctx.globalAlpha = p;
-            await this.renderClipToCanvas(ctx, topClip, t, width, height, assetMap);
+            await this.renderClipToCanvas(ctx, topClip, t, width, height, assetMap, imageBitmapCache);
             ctx.restore();
           } else {
-            await this.renderClipToCanvas(ctx, topClip, t, width, height, assetMap);
+            await this.renderClipToCanvas(ctx, topClip, t, width, height, assetMap, imageBitmapCache);
           }
+        }
 
-          // Render Burn-in Subtitles if present
-          if (topClip.subtitles && topClip.subtitles.length > 0) {
-            const relTime = t - topClip.startAt;
-            const activeSub = topClip.subtitles.find(s => relTime >= s.start && relTime <= s.end);
-            if (activeSub) {
-              this.renderStyledSubtitle(ctx, activeSub, topClip, relTime, width, height);
+        // Render Burn-in Subtitles from ANY active clip across the entire project at timestamp `t`
+        let activeSubtitleInfo: { sub: any; clip: TimelineClip; timeInClip: number } | null = null;
+        for (const track of editor.tracks) {
+          if (track.isMuted) continue;
+          for (const c of track.clips) {
+            if (t >= c.startAt && t <= c.startAt + c.duration) {
+              if (c.subtitles && c.subtitles.length > 0) {
+                const timeInClip = t - c.startAt;
+                const sub = c.subtitles.find(s => timeInClip >= s.start && timeInClip <= s.end);
+                if (sub) {
+                  activeSubtitleInfo = { sub, clip: c, timeInClip };
+                  break;
+                }
+              }
+            }
+          }
+          if (activeSubtitleInfo) break;
+        }
+
+        if (activeSubtitleInfo) {
+          this.renderStyledSubtitle(ctx, activeSubtitleInfo.sub, activeSubtitleInfo.clip, activeSubtitleInfo.timeInClip, width, height);
+        }
+
+        // Render any active Title/Text clips
+        for (const track of editor.tracks) {
+          if (track.isMuted) continue;
+          for (const c of track.clips) {
+            if (c.type === 'text' && c.text && t >= c.startAt && t <= c.startAt + c.duration) {
+              this.renderTextClip(ctx, c, width, height);
             }
           }
         }
@@ -285,6 +368,11 @@ export class Exporter {
       try { canvasSource.close(); } catch (_) {}
       try { await output.cancel(); } catch (_) {}
       throw loopErr;
+    } finally {
+      // Clean up cached image bitmaps
+      for (const bmp of imageBitmapCache.values()) {
+        try { bmp.close(); } catch (_) {}
+      }
     }
 
     const outputBuffer = target.buffer;
@@ -304,12 +392,12 @@ export class Exporter {
       blob,
       url,
       filename,
-      durationSec: totalDuration
+      durationSec: durationToExport
     };
   }
 
   /**
-   * Renders a video clip frame with speed curve, color grading, and crop handling
+   * Renders a video or image clip frame with speed curve, color grading, and crop handling
    */
   private static async renderClipToCanvas(
     ctx: CanvasRenderingContext2D,
@@ -317,7 +405,8 @@ export class Exporter {
     currentTime: number,
     canvasW: number,
     canvasH: number,
-    assetMap: Map<string, File>
+    assetMap: Map<string, File>,
+    imageBitmapCache?: Map<string, ImageBitmap>
   ) {
     const relTime = currentTime - clip.startAt;
     const normT = Math.max(0, Math.min(1, clip.duration > 0 ? relTime / clip.duration : 0));
@@ -326,14 +415,56 @@ export class Exporter {
 
     let frameRendered = false;
 
-    // Try decoding actual video frame via VideoDecoderWrapper
-    if (clip.assetId) {
+    // 1. Static Image Clip Rendering
+    if (clip.assetId && imageBitmapCache?.has(clip.assetId)) {
+      const bmp = imageBitmapCache.get(clip.assetId)!;
+      try {
+        ctx.save();
+        if (clip.colorGrading) {
+          const b = (clip.colorGrading.brightness ?? 0) + 1;
+          const c = clip.colorGrading.contrast ?? 1;
+          const s = clip.colorGrading.saturation ?? 1;
+          ctx.filter = `brightness(${b}) contrast(${c}) saturate(${s})`;
+        }
+
+        if (clip.cropRect) {
+          const sx = (clip.cropRect.x ?? 0) * bmp.width;
+          const sy = (clip.cropRect.y ?? 0) * bmp.height;
+          const sw = (clip.cropRect.w ?? 1) * bmp.width;
+          const sh = (clip.cropRect.h ?? 1) * bmp.height;
+          ctx.drawImage(bmp, sx, sy, sw, sh, 0, 0, canvasW, canvasH);
+        } else {
+          const imgAspect = bmp.width / bmp.height;
+          const canvasAspect = canvasW / canvasH;
+          let drawW = canvasW;
+          let drawH = canvasH;
+          let drawX = 0;
+          let drawY = 0;
+
+          if (imgAspect > canvasAspect) {
+            drawW = canvasH * imgAspect;
+            drawX = (canvasW - drawW) / 2;
+          } else {
+            drawH = canvasW / imgAspect;
+            drawY = (canvasH - drawH) / 2;
+          }
+          ctx.drawImage(bmp, drawX, drawY, drawW, drawH);
+        }
+        ctx.restore();
+        frameRendered = true;
+      } catch (imgErr) {
+        console.warn('[Exporter] Image render error:', imgErr);
+      }
+    }
+
+    // 2. Video Frame Decoding via VideoDecoderWrapper
+    if (!frameRendered && clip.assetId) {
       const file = assetMap.get(clip.assetId);
-      if (file) {
+      if (file && !file.type.startsWith('image/')) {
         let decoder = engine.getDecoder(file.name);
         if (!decoder) {
           try {
-            await engine.seekFrameWithTransition({ file, time: srcTime }, null, null, { mode: 'exact' });
+            await engine.preloadClip(file);
             decoder = engine.getDecoder(file.name);
           } catch (_) {}
         }
@@ -356,24 +487,6 @@ export class Exporter {
                   ctx.filter = `brightness(${b}) contrast(${c}) saturate(${s})`;
                 }
 
-                // Fit / Aspect Ratio Scaling
-                const frameAspect = vf.displayWidth / vf.displayHeight;
-                const canvasAspect = canvasW / canvasH;
-                let drawW = canvasW;
-                let drawH = canvasH;
-                let drawX = 0;
-                let drawY = 0;
-
-                if (frameAspect > canvasAspect) {
-                  // Video is wider: fit height
-                  drawW = canvasH * frameAspect;
-                  drawX = (canvasW - drawW) / 2;
-                } else {
-                  // Video is taller: fit width
-                  drawH = canvasW / frameAspect;
-                  drawY = (canvasH - drawH) / 2;
-                }
-
                 if (clip.isBgRemoved) {
                   const bgGrad = ctx.createRadialGradient(
                     canvasW / 2, canvasH * 0.4, 40,
@@ -389,9 +502,30 @@ export class Exporter {
                   ctx.beginPath();
                   ctx.ellipse(canvasW / 2, canvasH * 0.55, canvasW * 0.44, canvasH * 0.46, 0, 0, Math.PI * 2);
                   ctx.clip();
-                  ctx.drawImage(vf, drawX, drawY, drawW, drawH);
+                  ctx.drawImage(vf, 0, 0, canvasW, canvasH);
                   ctx.restore();
+                } else if (clip.cropRect) {
+                  const sx = (clip.cropRect.x ?? 0) * vf.displayWidth;
+                  const sy = (clip.cropRect.y ?? 0) * vf.displayHeight;
+                  const sw = (clip.cropRect.w ?? 1) * vf.displayWidth;
+                  const sh = (clip.cropRect.h ?? 1) * vf.displayHeight;
+                  ctx.drawImage(vf, sx, sy, sw, sh, 0, 0, canvasW, canvasH);
                 } else {
+                  // Fit / Aspect Ratio Scaling
+                  const frameAspect = vf.displayWidth / vf.displayHeight;
+                  const canvasAspect = canvasW / canvasH;
+                  let drawW = canvasW;
+                  let drawH = canvasH;
+                  let drawX = 0;
+                  let drawY = 0;
+
+                  if (frameAspect > canvasAspect) {
+                    drawW = canvasH * frameAspect;
+                    drawX = (canvasW - drawW) / 2;
+                  } else {
+                    drawH = canvasW / frameAspect;
+                    drawY = (canvasH - drawH) / 2;
+                  }
                   ctx.drawImage(vf, drawX, drawY, drawW, drawH);
                 }
                 ctx.restore();
@@ -407,7 +541,7 @@ export class Exporter {
       }
     }
 
-    // Fallback: procedural stylized frame if decoder is unavailable
+    // 3. Fallback: procedural stylized frame if decoder is unavailable
     if (!frameRendered) {
       this.renderProceduralClipFrame(ctx, clip, currentTime, canvasW, canvasH);
     }
@@ -464,6 +598,28 @@ export class Exporter {
   }
 
   /**
+   * Render title or text overlay clip directly to canvas
+   */
+  private static renderTextClip(
+    ctx: CanvasRenderingContext2D,
+    clip: TimelineClip,
+    canvasW: number,
+    canvasH: number
+  ) {
+    if (!clip.text) return;
+    ctx.save();
+    const fontSize = Math.max(24, Math.floor(canvasW * 0.05));
+    ctx.font = `bold ${fontSize}px system-ui, -apple-system, sans-serif`;
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillStyle = clip.color || '#ffffff';
+    ctx.shadowColor = 'rgba(0,0,0,0.8)';
+    ctx.shadowBlur = 10;
+    ctx.fillText(clip.text, canvasW / 2, canvasH / 2);
+    ctx.restore();
+  }
+
+  /**
    * Mixes all audio clips and video audio tracks using OfflineAudioContext (Faster-Than-Realtime)
    */
   private static async mixTimelineAudio(
@@ -471,10 +627,9 @@ export class Exporter {
     startSec: number = 0,
     durationToExport?: number
   ): Promise<AudioBuffer | null> {
-    // Collect asset IDs on dedicated active audio tracks to prevent double-audio echo with video clips
+    // Collect asset IDs on ALL dedicated audio tracks to prevent double-audio echo with video clips
     const audioTrackAssetIds = new Set<string>();
     for (const track of editor.tracks) {
-      if (track.isMuted) continue;
       if (track.name.startsWith('A') || track.type === 'audio') {
         for (const clip of track.clips) {
           if (clip.assetId) audioTrackAssetIds.add(clip.assetId);
@@ -494,6 +649,7 @@ export class Exporter {
         if (clip.type === 'audio' || isAudioTrack) {
           audioClips.push(clip);
         } else if (clip.type === 'video' || (!clip.type && !isAudioTrack)) {
+          // Only play video audio if there is NO companion audio clip for this asset
           if (!clip.assetId || !audioTrackAssetIds.has(clip.assetId)) {
             audioClips.push(clip);
           }
@@ -524,8 +680,6 @@ export class Exporter {
         if (clipAudioBuffer) {
           const sourceNode = offlineCtx.createBufferSource();
           sourceNode.buffer = clipAudioBuffer;
-
-
 
           // Pitch shift
           const pitchShift = clip.audioEnvelope?.pitchShift ?? 0;
@@ -687,4 +841,3 @@ export class Exporter {
     ctx.restore();
   }
 }
-

@@ -7,7 +7,7 @@
 
   let { isOpen = $bindable(false) } = $props<{ isOpen: boolean }>();
 
-  let preset = $state<'tiktok_9_16' | 'youtube_16_9' | 'square_1_1'>('tiktok_9_16');
+  let preset = $state<'tiktok_9_16' | 'youtube_16_9' | 'square_1_1' | 'cinematic_21_9'>('tiktok_9_16');
   let fps = $state<number>(30);
   let format = $state<'mp4' | 'webm'>('mp4');
   let quality = $state<'high' | 'medium'>('high');
@@ -19,13 +19,34 @@
   let errorMessage = $state<string | null>(null);
   let abortController = $state<AbortController | null>(null);
 
-  // Sync export range with In/Out presence when modal opens
+  // Sync export range and preset with project state when modal opens
   $effect(() => {
     if (isOpen) {
       if (editor.inPoint !== null || editor.outPoint !== null) {
         exportRange = 'in_out';
       } else {
         exportRange = 'entire';
+      }
+
+      // Automatically sync resolution preset with active editor aspect ratio
+      if (editor.aspectRatio === '16:9') {
+        preset = 'youtube_16_9';
+      } else if (editor.aspectRatio === '9:16') {
+        preset = 'tiktok_9_16';
+      } else if (editor.aspectRatio === '1:1') {
+        preset = 'square_1_1';
+      } else if (editor.aspectRatio === '21:9') {
+        preset = 'cinematic_21_9';
+      } else if (editor.aspectRatio === 'original') {
+        if (editor.originalWidth && editor.originalHeight) {
+          const ratio = editor.originalWidth / editor.originalHeight;
+          if (ratio > 2.0) preset = 'cinematic_21_9';
+          else if (ratio > 1.3) preset = 'youtube_16_9';
+          else if (ratio < 0.8) preset = 'tiktok_9_16';
+          else preset = 'square_1_1';
+        } else {
+          preset = 'youtube_16_9';
+        }
       }
     }
   });
@@ -109,7 +130,7 @@
     <Dialog.Content 
       onEscapeKeydown={(e) => { if (isExporting) e.preventDefault(); }}
       onInteractOutside={(e) => { if (isExporting) e.preventDefault(); }}
-      class="fixed left-1/2 bottom-0 sm:bottom-auto sm:top-1/2 z-50 w-full max-w-md -translate-x-1/2 sm:-translate-y-1/2 bg-neutral-900 border-t sm:border border-neutral-800 rounded-t-3xl sm:rounded-2xl max-h-[90vh] overflow-hidden shadow-2xl flex flex-col pb-[env(safe-area-inset-bottom,0px)] outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0"
+      class="fixed left-1/2 bottom-0 sm:bottom-auto sm:top-1/2 z-50 w-full max-w-md sm:max-w-lg -translate-x-1/2 sm:-translate-y-1/2 bg-neutral-900 border-t sm:border border-neutral-800 rounded-t-3xl sm:rounded-2xl max-h-[90vh] overflow-hidden shadow-2xl flex flex-col pb-[env(safe-area-inset-bottom,0px)] outline-none data-[state=open]:animate-in data-[state=closed]:animate-out data-[state=closed]:fade-out-0 data-[state=open]:fade-in-0"
     >
       <!-- Mobile drag indicator bar -->
       <div class="w-12 h-1.5 bg-neutral-700 rounded-full mx-auto mt-2.5 sm:hidden flex-none"></div>
@@ -139,32 +160,41 @@
           <!-- Preset Selector -->
           <div class="space-y-1.5">
             <div class="text-xs font-semibold text-neutral-300">Format & Çözünürlük</div>
-            <div class="grid grid-cols-3 gap-2">
+            <div class="grid grid-cols-2 sm:grid-cols-4 gap-2">
               <button
                 onclick={() => preset = 'tiktok_9_16'}
-                class="p-2.5 rounded-xl border text-center transition-all {preset === 'tiktok_9_16' ? 'bg-blue-600/20 border-blue-500 text-white font-medium' : 'bg-neutral-800/60 border-neutral-700 text-neutral-400 hover:bg-neutral-800'}"
+                class="p-2.5 rounded-xl border text-center transition-all {preset === 'tiktok_9_16' ? 'bg-blue-600/20 border-blue-500 text-white font-medium shadow-sm' : 'bg-neutral-800/60 border-neutral-700 text-neutral-400 hover:bg-neutral-800'}"
               >
                 <div class="text-xs font-bold">9:16 Dikey</div>
                 <div class="text-[10px] text-neutral-400">TikTok / Reels</div>
-                <div class="text-[9px] text-neutral-500">1080x1920</div>
+                <div class="text-[9px] text-neutral-500 font-mono">1080x1920</div>
               </button>
 
               <button
                 onclick={() => preset = 'youtube_16_9'}
-                class="p-2.5 rounded-xl border text-center transition-all {preset === 'youtube_16_9' ? 'bg-blue-600/20 border-blue-500 text-white font-medium' : 'bg-neutral-800/60 border-neutral-700 text-neutral-400 hover:bg-neutral-800'}"
+                class="p-2.5 rounded-xl border text-center transition-all {preset === 'youtube_16_9' ? 'bg-blue-600/20 border-blue-500 text-white font-medium shadow-sm' : 'bg-neutral-800/60 border-neutral-700 text-neutral-400 hover:bg-neutral-800'}"
               >
                 <div class="text-xs font-bold">16:9 Yatay</div>
                 <div class="text-[10px] text-neutral-400">YouTube / TV</div>
-                <div class="text-[9px] text-neutral-500">1920x1080</div>
+                <div class="text-[9px] text-neutral-500 font-mono">1920x1080</div>
               </button>
 
               <button
                 onclick={() => preset = 'square_1_1'}
-                class="p-2.5 rounded-xl border text-center transition-all {preset === 'square_1_1' ? 'bg-blue-600/20 border-blue-500 text-white font-medium' : 'bg-neutral-800/60 border-neutral-700 text-neutral-400 hover:bg-neutral-800'}"
+                class="p-2.5 rounded-xl border text-center transition-all {preset === 'square_1_1' ? 'bg-blue-600/20 border-blue-500 text-white font-medium shadow-sm' : 'bg-neutral-800/60 border-neutral-700 text-neutral-400 hover:bg-neutral-800'}"
               >
                 <div class="text-xs font-bold">1:1 Kare</div>
                 <div class="text-[10px] text-neutral-400">Instagram</div>
-                <div class="text-[9px] text-neutral-500">1080x1080</div>
+                <div class="text-[9px] text-neutral-500 font-mono">1080x1080</div>
+              </button>
+
+              <button
+                onclick={() => preset = 'cinematic_21_9'}
+                class="p-2.5 rounded-xl border text-center transition-all {preset === 'cinematic_21_9' ? 'bg-indigo-600/20 border-indigo-500 text-white font-medium shadow-sm' : 'bg-neutral-800/60 border-neutral-700 text-neutral-400 hover:bg-neutral-800'}"
+              >
+                <div class="text-xs font-bold">21:9 Sinema</div>
+                <div class="text-[10px] text-neutral-400">Ultra-Geniş</div>
+                <div class="text-[9px] text-neutral-500 font-mono">2560x1080</div>
               </button>
             </div>
           </div>
