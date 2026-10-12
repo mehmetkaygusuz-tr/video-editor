@@ -107,7 +107,8 @@ self.onmessage = async (e: MessageEvent) => {
           const result = await transcriber(audioData, {
             chunk_length_s: 30,
             stride_length_s: 5,
-            return_timestamps: 'word'
+            return_timestamps: 'word',
+            task: 'transcribe'
           });
 
           resultText = typeof result?.text === 'string' ? result.text.trim() : '';
@@ -210,8 +211,11 @@ self.onmessage = async (e: MessageEvent) => {
       const speechSegments: { start: number; end: number }[] = [];
 
       try {
-        const myvad = await vad.NonRealTimeVAD.new();
-        loadedModelsList.add('Silero VAD v5');
+        const vadModelUrl = (self.location?.origin || '') + '/silero_vad_legacy.onnx';
+        const myvad = await vad.NonRealTimeVAD.new({
+          modelURL: vadModelUrl
+        });
+        loadedModelsList.add('Silero VAD (ONNX)');
         notifyLog('Silero VAD modeli hazır, konuşma alanları taranıyor...');
 
         const CHUNK_SECONDS = 30;

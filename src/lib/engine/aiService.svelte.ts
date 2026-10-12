@@ -4,7 +4,7 @@
 import { engine } from './orchestrator.svelte';
 import { editor } from '../editor.svelte';
 import { masterAudioClock } from './audioClock';
-import { getFileFromOPFS } from '../opfs';
+import { getFileFromOPFS, saveFileToOPFS } from '../opfs';
 import type { AIFeatureId, AIFeatureInfo, SubtitleItem, TimelineClip } from '../types';
 import { VIRAL_HOOKS_DATABASE, getRandomHook } from '../data/viralHooksData';
 
@@ -626,11 +626,19 @@ export class AIService {
       if (res.pcmData && res.pcmData.length > 0) {
         const wavBlob = encodeWav(res.pcmData, res.sampleRate || 24000);
         blobUrl = URL.createObjectURL(wavBlob);
+        const fileName = `TTS_${voice}_${Date.now().toString().slice(-4)}.wav`;
+        const audioFile = new File([wavBlob], fileName, { type: 'audio/wav' });
+
+        // Cache in memory and persist in OPFS for zero-latency playback & export
+        editor.setCachedFile(fileName, audioFile);
+        try {
+          await saveFileToOPFS(audioFile, fileName);
+        } catch (_) {}
 
         // Register in editor media pool
         editor.assets.push({
           id: assetId,
-          name: `TTS_${voice}_${Date.now().toString().slice(-4)}.wav`,
+          name: fileName,
           type: 'audio',
           duration: actualDuration,
           color: '#10b981',
@@ -870,6 +878,22 @@ export class AIService {
       const isVideo = mediaBlob.type.startsWith('video') || clip.type === 'video';
       const url = URL.createObjectURL(mediaBlob);
 
+      const createSafeFallbackCanvas = (): string => {
+        const fallbackCanvas = document.createElement('canvas');
+        fallbackCanvas.width = 640;
+        fallbackCanvas.height = 360;
+        const fallbackCtx = fallbackCanvas.getContext('2d');
+        if (fallbackCtx) {
+          const grad = fallbackCtx.createLinearGradient(0, 0, 640, 360);
+          grad.addColorStop(0, '#1e293b');
+          grad.addColorStop(1, '#0f172a');
+          fallbackCtx.fillStyle = grad;
+          fallbackCtx.fillRect(0, 0, 640, 360);
+          return fallbackCanvas.toDataURL('image/jpeg', 0.85);
+        }
+        return '';
+      };
+
       if (!isVideo) {
         // Image asset: render directly to canvas and get data URL
         return new Promise((resolve) => {
@@ -884,13 +908,13 @@ export class AIService {
               ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
               resolve(canvas.toDataURL('image/jpeg', 0.85));
             } else {
-              resolve(url);
+              resolve(createSafeFallbackCanvas());
             }
             URL.revokeObjectURL(url);
           };
           img.onerror = () => {
             URL.revokeObjectURL(url);
-            resolve(url);
+            resolve(createSafeFallbackCanvas());
           };
           img.src = url;
         });
@@ -923,7 +947,7 @@ export class AIService {
         const timeoutId = setTimeout(() => {
           if (!resolved) {
             cleanup();
-            resolve(url);
+            resolve(createSafeFallbackCanvas());
           }
         }, 5000);
 
@@ -950,13 +974,13 @@ export class AIService {
           }
           clearTimeout(timeoutId);
           cleanup();
-          resolve(url);
+          resolve(createSafeFallbackCanvas());
         };
 
         video.onerror = () => {
           clearTimeout(timeoutId);
           cleanup();
-          resolve(url);
+          resolve(createSafeFallbackCanvas());
         };
       });
     } catch (e) {

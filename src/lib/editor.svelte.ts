@@ -704,7 +704,11 @@ class VideoEditor {
         return;
       }
       const asset = assetId ? this.assets.find(a => a.id === assetId) : undefined;
-      const resolvedType = options?.type || asset?.type || (track.name.startsWith('A') ? 'audio' : 'video');
+      let defaultType: 'video' | 'audio' | 'text' | 'effect' = 'video';
+      if (track.type === 'audio' || track.name.startsWith('A')) defaultType = 'audio';
+      else if (track.type === 'subtitle' || track.name.startsWith('T')) defaultType = 'text';
+      else if (track.type === 'effect' || track.name.startsWith('FX')) defaultType = 'effect';
+      const resolvedType = options?.type || asset?.type || defaultType;
       let sourceUrl = options?.sourceUrl || asset?.blobUrl || '';
       
       const quantizedStart = quantizeToFrame(startAt, this.projectFps);

@@ -690,7 +690,7 @@
     let dropTime = Math.max(0, (mouseX + editor.scrollX) / editor.zoom);
     
     // Magnetic & Beat Snapping for Drop
-    const snapThreshold = 10 / editor.zoom;
+    const snapThreshold = Math.max(0.35, 18 / editor.zoom);
     let snapPoints: number[] = [editor.playhead];
     
     if (editor.isMagnetic) {
@@ -717,9 +717,22 @@
     // Create a new clip based on the dropped asset
     editor.addClip(trackId, asset.name, dropTime, asset.duration || 10, asset.color, asset.id, { type: asset.type });
     
-    // Auto-preview the dropped video
+    // If dropped asset is a video, also create associated audio clip on track A1 (matching StudioSidebar behavior)
     if (asset.type === 'video') {
-       triggerPreview(asset.id);
+      let aTrack = editor.tracks.find(t => t.type === 'audio' || t.name === 'A1' || t.name.startsWith('A'));
+      if (!aTrack) {
+        aTrack = editor.addTrack('A1', 'audio');
+      }
+      editor.addClip(
+        aTrack.id,
+        `${asset.name} (Ses)`,
+        dropTime,
+        asset.duration || 10,
+        '#10b981',
+        asset.id,
+        { type: 'audio' }
+      );
+      triggerPreview(asset.id);
     }
   }
 
@@ -839,31 +852,27 @@
     }
   }
 
-  // Auto-scroll timeline to follow playhead during playback (keeps needle in comfortable viewport)
-  let lastAutoScrollTime = 0;
+  // Auto-scroll timeline to follow playhead smoothly during playback
   $effect(() => {
     if (editor.isPlaying && !isDraggingPlayhead && !isPanning && activePointers.size === 0) {
       const currentPlayhead = editor.playhead;
       const currentZoom = editor.zoom;
-      const now = performance.now();
       untrack(() => {
-        if (now - lastAutoScrollTime < 100) return; // Prevent 60fps layout thrashing
         const playheadPx = currentPlayhead * currentZoom;
         if (isMobileMode && containerWidth > 0) {
           const targetScroll = Math.max(0, playheadPx - (containerWidth / 2));
-          if (Math.abs(targetScroll - editor.scrollX) > 4) {
-            editor.scrollX = targetScroll;
-            lastAutoScrollTime = now;
+          const diff = targetScroll - editor.scrollX;
+          if (Math.abs(diff) > 2) {
+            // Smoothly interpolate scroll position to follow playhead without stepped jumps
+            editor.scrollX = Math.round(editor.scrollX + diff * 0.2);
           }
         } else if (containerWidth > 0) {
           const visibleLeft = editor.scrollX;
           const visibleRight = editor.scrollX + containerWidth - effectiveHeaderWidth;
           if (playheadPx > visibleRight - 40) {
             editor.scrollX = Math.max(0, playheadPx - 80);
-            lastAutoScrollTime = now;
           } else if (playheadPx < visibleLeft) {
             editor.scrollX = Math.max(0, playheadPx - 40);
-            lastAutoScrollTime = now;
           }
         }
       });

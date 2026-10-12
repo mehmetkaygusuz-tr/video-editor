@@ -211,7 +211,7 @@ export class MasterAudioClock {
     const audioTrackAssetIds = new Set<string>();
     for (const track of tracks) {
       if (track.isMuted) continue;
-      if (track.name.startsWith('A')) {
+      if (track.type === 'audio' || track.name.startsWith('A')) {
         for (const clip of track.clips) {
           if (clip.assetId) audioTrackAssetIds.add(clip.assetId);
         }
@@ -226,8 +226,9 @@ export class MasterAudioClock {
 
       for (const clip of track.clips) {
         if (clip.type === 'text') continue;
+        const isVideoTrack = track.type === 'video' || track.name.startsWith('V');
         // If this is a video track clip and its audio is already handled on a dedicated audio track, skip to avoid double sound
-        if (track.name.startsWith('V') && clip.assetId && audioTrackAssetIds.has(clip.assetId)) {
+        if (isVideoTrack && clip.assetId && audioTrackAssetIds.has(clip.assetId)) {
           continue;
         }
         const clipEnd = clip.startAt + clip.duration;
@@ -261,8 +262,19 @@ export class MasterAudioClock {
     isSpeechActive: boolean
   ) {
     const ctx = this.getAudioContext();
-    const buffer = await this.getOrDecodeAudioBuffer(clip);
-    if (!buffer || !this.isPlaying) return;
+    let buffer: AudioBuffer | null = null;
+    try {
+      buffer = await this.getOrDecodeAudioBuffer(clip);
+    } catch (_) {}
+
+    if (!buffer || !this.isPlaying) {
+      this.scheduledClipIds.delete(clip.id);
+      return;
+    }
+
+    // Re-anchor audioNow and timelineStart to account for any decoding latency
+    const currentAudioNow = ctx.currentTime;
+    const currentTimeline = this.getCurrentTime();
 
     try {
       const source = ctx.createBufferSource();
@@ -275,8 +287,8 @@ export class MasterAudioClock {
       // Dedicated GainNode for sample-accurate volume automation & envelope
       const gainNode = ctx.createGain();
 
-      // Envelope calculation
-      const elapsed = Math.max(0, timelineStart - clip.startAt);
+      // Envelope calculation based on current exact timeline position
+      const elapsed = Math.max(0, currentTimeline - clip.startAt);
       let envelopeMultiplier = 1.0;
       const fadeInSec = clip.audioEnvelope?.fadeIn ?? 0;
       const fadeOutSec = clip.audioEnvelope?.fadeOut ?? 0;
@@ -297,26 +309,26 @@ export class MasterAudioClock {
       const targetGain = Math.max(0, Math.min(2.0, (clip.volume ?? 1.0) * envelopeMultiplier));
 
       // Click/Pop-Free Envelope: 4ms micro-fade in
-      gainNode.gain.setValueAtTime(0.0001, audioNow);
-      gainNode.gain.linearRampToValueAtTime(targetGain, audioNow + 0.004);
+      gainNode.gain.setValueAtTime(0.0001, currentAudioNow);
+      gainNode.gain.linearRampToValueAtTime(targetGain, currentAudioNow + 0.004);
 
       source.connect(gainNode);
       gainNode.connect(ctx.destination);
 
-      let when = audioNow;
+      let when = currentAudioNow;
       let offset = clip.sourceOffset || 0;
       let duration = clip.duration;
 
-      if (timelineStart >= clip.startAt) {
+      if (currentTimeline >= clip.startAt) {
         // Clip is already playing
-        const timeIntoClip = (timelineStart - clip.startAt) * currentSpeed;
+        const timeIntoClip = (currentTimeline - clip.startAt) * currentSpeed;
         offset += timeIntoClip;
-        duration = Math.max(0, clip.duration - (timelineStart - clip.startAt));
-        when = audioNow;
+        duration = Math.max(0, clip.duration - (currentTimeline - clip.startAt));
+        when = currentAudioNow;
       } else {
         // Clip starts in the future
-        const delayTimeline = (clip.startAt - timelineStart) / this.playbackRate;
-        when = audioNow + delayTimeline;
+        const delayTimeline = (clip.startAt - currentTimeline) / this.playbackRate;
+        when = currentAudioNow + delayTimeline;
       }
 
       // Validate offset & duration within buffer limits
@@ -335,9 +347,12 @@ export class MasterAudioClock {
           this.activeSources.delete(nodeKey);
           this.scheduledClipIds.delete(clip.id);
         };
+      } else {
+        this.scheduledClipIds.delete(clip.id);
       }
     } catch (err) {
       console.warn(`Failed to schedule audio clip ${clip.id}:`, err);
+      this.scheduledClipIds.delete(clip.id);
     }
   }
 
@@ -480,8 +495,11 @@ export class MasterAudioClock {
   }
 
   private mergeAudioBuffers(ctx: AudioContext, buffers: AudioBuffer[]): AudioBuffer {
+    if (buffers.length === 0) {
+      return ctx.createBuffer(2, Math.max(1, Math.floor(ctx.sampleRate * 0.1)), ctx.sampleRate);
+    }
     if (buffers.length === 1) return buffers[0];
-    const numChannels = buffers[0].numberOfChannels;
+    const numChannels = Math.max(...buffers.map(b => b.numberOfChannels), 1);
     const sampleRate = buffers[0].sampleRate;
     const totalLength = buffers.reduce((acc, b) => acc + b.length, 0);
 
@@ -490,7 +508,8 @@ export class MasterAudioClock {
       const dest = merged.getChannelData(ch);
       let offset = 0;
       for (const buf of buffers) {
-        dest.set(buf.getChannelData(ch), offset);
+        const src = ch < buf.numberOfChannels ? buf.getChannelData(ch) : buf.getChannelData(0);
+        dest.set(src, offset);
         offset += buf.length;
       }
     }

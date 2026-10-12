@@ -484,10 +484,15 @@ export class Exporter {
     const audioClips: TimelineClip[] = [];
     for (const track of editor.tracks) {
       if (track.isMuted) continue;
+      const isAudioTrack = track.type === 'audio' || track.name.startsWith('A');
       for (const clip of track.clips) {
-        if (clip.type === 'audio') {
+        if (clip.type === 'text') continue;
+        const vol = clip.volume ?? 1.0;
+        if (vol <= 0) continue;
+
+        if (clip.type === 'audio' || isAudioTrack) {
           audioClips.push(clip);
-        } else if (clip.type === 'video' && (clip.volume ?? 1) > 0) {
+        } else if (clip.type === 'video' || (!clip.type && !isAudioTrack)) {
           if (!clip.assetId || !audioTrackAssetIds.has(clip.assetId)) {
             audioClips.push(clip);
           }

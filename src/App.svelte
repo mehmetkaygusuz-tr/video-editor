@@ -351,8 +351,11 @@
     // Advanced Multi-Track & Transition Search
     let activeClips: TimelineClip[] = [];
     for (const track of editor.tracks) {
+      if (track.isMuted) continue;
+      const isTrackAudio = track.type === 'audio' || track.name.startsWith('A');
       for (const clip of track.clips) {
-        if (clip.type === 'video' || clip.type === 'image' || (!clip.type && !track.name.startsWith('A'))) {
+        const isVideo = clip.type === 'video' || clip.type === 'image' || (!clip.type && !isTrackAudio);
+        if (isVideo) {
           if (videoPTS >= clip.startAt && videoPTS <= clip.startAt + clip.duration) {
             activeClips.push(clip);
           }
