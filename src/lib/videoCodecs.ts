@@ -57,6 +57,7 @@ export class VideoDecoderWrapper implements IDecoderEngine {
   private _lastIsKeyframe = false;
   private _lastMode: 'fast_keyframe' | 'exact' | 'idle' = 'idle';
   private _lastDurationMs = 0;
+  private _lastPlaybackFrame: VideoFrame | null = null;
 
   get isLoaded(): boolean {
     return this._fileLoaded;
@@ -386,10 +387,10 @@ export class VideoDecoderWrapper implements IDecoderEngine {
       this._fillStreamBuffer(targetTime, token);
     }
 
-    // Wait briefly (up to 35ms) if the buffer is empty immediately after streaming starts
+    // Wait adequately (up to 120ms with 5ms polls) if the buffer is empty immediately after streaming starts
     if (this._streamBuffer.length === 0 && this._isStreamFilling) {
       let waited = 0;
-      while (this._streamBuffer.length === 0 && this._isStreamFilling && waited < 35 && !this._streamCancelToken?.cancelled) {
+      while (this._streamBuffer.length === 0 && this._isStreamFilling && waited < 120 && !this._streamCancelToken?.cancelled) {
         await new Promise(r => setTimeout(r, 5));
         waited += 5;
       }
@@ -404,12 +405,15 @@ export class VideoDecoderWrapper implements IDecoderEngine {
     // Check if the head frame matches the target presentation time
     if (this._streamBuffer.length > 0) {
       const candidate = this._streamBuffer[0];
-      if (Math.abs(candidate.pts - targetTime) <= 0.35) {
+      if (Math.abs(candidate.pts - targetTime) <= 0.4) {
         const durationMs = performance.now() - tStart;
         this._lastPTS = candidate.pts;
         this._lastIsKeyframe = false;
         this._lastMode = 'exact';
         this._lastDurationMs = durationMs;
+
+        try { this._lastPlaybackFrame?.close(); } catch {}
+        this._lastPlaybackFrame = candidate.frame.clone();
 
         return {
           frame: candidate.frame.clone(),
@@ -421,8 +425,40 @@ export class VideoDecoderWrapper implements IDecoderEngine {
       }
     }
 
-    // Fallback: adaptive seek if streaming pipeline is momentarily catching up
-    return await this.seek(targetTime, { mode: 'adaptive' });
+    // If stream is still active/filling, return held frame (Frame Holding) rather than spawning
+    // a competing decoder seek that thrashes the GPU!
+    if (this._isStreamFilling && this._lastPlaybackFrame) {
+      const durationMs = performance.now() - tStart;
+      return {
+        frame: this._lastPlaybackFrame.clone(),
+        pts: this._lastPTS,
+        isKeyframe: false,
+        mode: 'exact',
+        decodeDurationMs: durationMs
+      };
+    }
+
+    // Fallback: adaptive seek only if streaming pipeline is completely inactive
+    if (!this._streamActive) {
+      const res = await this.seek(targetTime, { mode: 'adaptive' });
+      if (res?.frame) {
+        try { this._lastPlaybackFrame?.close(); } catch {}
+        this._lastPlaybackFrame = res.frame.clone();
+      }
+      return res;
+    }
+
+    if (this._lastPlaybackFrame) {
+      return {
+        frame: this._lastPlaybackFrame.clone(),
+        pts: this._lastPTS,
+        isKeyframe: false,
+        mode: 'exact',
+        decodeDurationMs: performance.now() - tStart
+      };
+    }
+
+    return null;
   }
 
   private async _fillStreamBuffer(startPTS: number, token: { cancelled: boolean }) {
@@ -497,6 +533,11 @@ export class VideoDecoderWrapper implements IDecoderEngine {
 
   dispose() {
     this.stopStreaming();
+
+    try {
+      this._lastPlaybackFrame?.close();
+    } catch {}
+    this._lastPlaybackFrame = null;
 
     if (this._pendingSeek) {
       this._pendingSeek.resolve(null);

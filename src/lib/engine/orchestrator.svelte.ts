@@ -8,7 +8,7 @@ export type WorkerMessage = {
     payload?: any;
 };
 
-const MAX_ACTIVE_DECODERS = 3;
+const MAX_ACTIVE_DECODERS = 8;
 
 export class EngineOrchestrator {
     #demuxerWorker: Worker | null = null;
@@ -184,6 +184,28 @@ export class EngineOrchestrator {
 
     getDecoder(fileName: string): VideoDecoderWrapper | undefined {
         return this.#decoderMap.get(fileName);
+    }
+
+    async preloadClip(file: File): Promise<void> {
+        if (!file || this.#decoderMap.has(file.name) || this.#loadingFiles.has(file.name)) return;
+        this.#loadingFiles.add(file.name);
+        try {
+            const newDecoder = new VideoDecoderWrapper();
+            await newDecoder.load(file);
+            if (this.#decoderMap.size >= MAX_ACTIVE_DECODERS) {
+                const oldestKey = this.#decoderMap.keys().next().value;
+                if (oldestKey) {
+                    const oldDecoder = this.#decoderMap.get(oldestKey);
+                    try { oldDecoder?.stopStreaming(); oldDecoder?.dispose(); } catch (_) {}
+                    this.#decoderMap.delete(oldestKey);
+                }
+            }
+            this.#decoderMap.set(file.name, newDecoder);
+        } catch (err) {
+            console.warn('[Orchestrator] Preload clip failed:', err);
+        } finally {
+            this.#loadingFiles.delete(file.name);
+        }
     }
 
     async seekFrame(file: File, timeInSeconds: number, colorGrading?: any, options?: SeekOptions) {
@@ -400,84 +422,109 @@ export class EngineOrchestrator {
                 canvas.height = srcH || 1080;
             }
 
-            // 1. Draw Primary Frame with Color Grading
-            ctx.save();
-            const g1 = clip1.grading;
-            if (g1?.brightness || g1?.contrast || g1?.saturation) {
-                const b = (g1.brightness ?? 0) + 1;
-                const c = (g1.contrast ?? 1);
-                const s = (g1.saturation ?? 1);
-                ctx.filter = `brightness(${b}) contrast(${c}) saturate(${s})`;
-            } else {
-                ctx.filter = 'none';
-            }
-
-            if (clip1.isBgRemoved) {
-                // Isolated subject cutout with dynamic background
-                const bgGrad = ctx.createRadialGradient(
-                    canvas.width / 2, canvas.height * 0.4, 40,
-                    canvas.width / 2, canvas.height * 0.5, canvas.height * 0.65
-                );
-                bgGrad.addColorStop(0, '#312e81');
-                bgGrad.addColorStop(0.5, '#0f172a');
-                bgGrad.addColorStop(1, '#020617');
-                ctx.fillStyle = bgGrad;
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-
+            const drawSource = (
+                src: { type: 'frame', frame: VideoFrame } | { type: 'video', video: HTMLVideoElement },
+                clip: { grading?: any, cropRect?: any, isBgRemoved?: boolean },
+                alpha: number = 1.0,
+                clipRect?: { x: number; y: number; w: number; h: number }
+            ) => {
                 ctx.save();
-                ctx.beginPath();
-                ctx.ellipse(canvas.width / 2, canvas.height * 0.55, canvas.width * 0.44, canvas.height * 0.46, 0, 0, Math.PI * 2);
-                ctx.clip();
-                if (src1.type === 'frame') {
-                    ctx.drawImage(src1.frame, 0, 0, canvas.width, canvas.height);
-                } else {
-                    ctx.drawImage(src1.video, 0, 0, canvas.width, canvas.height);
+                ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+                if (clipRect) {
+                    ctx.beginPath();
+                    ctx.rect(clipRect.x, clipRect.y, clipRect.w, clipRect.h);
+                    ctx.clip();
                 }
-                ctx.restore();
-            } else if (clip1.cropRect) {
-                const sx = (clip1.cropRect.x ?? 0) * srcW;
-                const sy = (clip1.cropRect.y ?? 0) * srcH;
-                const sw = (clip1.cropRect.w ?? 1) * srcW;
-                const sh = (clip1.cropRect.h ?? 1) * srcH;
-                if (src1.type === 'frame') {
-                    ctx.drawImage(src1.frame, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-                } else {
-                    ctx.drawImage(src1.video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-                }
-            } else {
-                if (src1.type === 'frame') {
-                    ctx.drawImage(src1.frame, 0, 0, canvas.width, canvas.height);
-                } else {
-                    ctx.drawImage(src1.video, 0, 0, canvas.width, canvas.height);
-                }
-            }
-            ctx.restore();
-
-            // 2. Draw Secondary Frame with Transition (if active)
-            if (src2 && transition && transition.progress > 0) {
-                ctx.save();
-                ctx.globalAlpha = Math.max(0, Math.min(1, transition.progress));
-                const g2 = clip2?.grading;
-                if (g2?.brightness || g2?.contrast || g2?.saturation) {
-                    const b = (g2.brightness ?? 0) + 1;
-                    const c = (g2.contrast ?? 1);
-                    const s = (g2.saturation ?? 1);
+                const g = clip.grading;
+                if (g?.brightness || g?.contrast || g?.saturation) {
+                    const b = (g.brightness ?? 0) + 1;
+                    const c = (g.contrast ?? 1);
+                    const s = (g.saturation ?? 1);
                     ctx.filter = `brightness(${b}) contrast(${c}) saturate(${s})`;
                 } else {
                     ctx.filter = 'none';
                 }
 
-                if (src2.type === 'frame') {
-                    ctx.drawImage(src2.frame, 0, 0, canvas.width, canvas.height);
+                const sW = src.type === 'frame' ? src.frame.displayWidth : src.video.videoWidth;
+                const sH = src.type === 'frame' ? src.frame.displayHeight : src.video.videoHeight;
+
+                if (clip.isBgRemoved) {
+                    const bgGrad = ctx.createRadialGradient(
+                        canvas.width / 2, canvas.height * 0.4, 40,
+                        canvas.width / 2, canvas.height * 0.5, canvas.height * 0.65
+                    );
+                    bgGrad.addColorStop(0, '#312e81');
+                    bgGrad.addColorStop(0.5, '#0f172a');
+                    bgGrad.addColorStop(1, '#020617');
+                    ctx.fillStyle = bgGrad;
+                    ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+                    ctx.save();
+                    ctx.beginPath();
+                    ctx.ellipse(canvas.width / 2, canvas.height * 0.55, canvas.width * 0.44, canvas.height * 0.46, 0, 0, Math.PI * 2);
+                    ctx.clip();
+                    if (src.type === 'frame') {
+                        ctx.drawImage(src.frame, 0, 0, canvas.width, canvas.height);
+                    } else {
+                        ctx.drawImage(src.video, 0, 0, canvas.width, canvas.height);
+                    }
+                    ctx.restore();
+                } else if (clip.cropRect) {
+                    const sx = (clip.cropRect.x ?? 0) * sW;
+                    const sy = (clip.cropRect.y ?? 0) * sH;
+                    const sw = (clip.cropRect.w ?? 1) * sW;
+                    const sh = (clip.cropRect.h ?? 1) * sH;
+                    if (src.type === 'frame') {
+                        ctx.drawImage(src.frame, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+                    } else {
+                        ctx.drawImage(src.video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
+                    }
                 } else {
-                    ctx.drawImage(src2.video, 0, 0, canvas.width, canvas.height);
+                    if (src.type === 'frame') {
+                        ctx.drawImage(src.frame, 0, 0, canvas.width, canvas.height);
+                    } else {
+                        ctx.drawImage(src.video, 0, 0, canvas.width, canvas.height);
+                    }
                 }
                 ctx.restore();
+            };
+
+            if (transition && src2 && clip2) {
+                const p = Math.max(0, Math.min(1, transition.progress));
+                const type = transition.type || 'cross-dissolve';
+                if (type === 'cross-dissolve' || type === 'dissolve') {
+                    drawSource(src1, clip1, 1.0);
+                    drawSource(src2, clip2, p);
+                } else if (type === 'fade-to-black' || type === 'fade') {
+                    if (p < 0.5) {
+                        ctx.fillStyle = '#090a0f';
+                        ctx.fillRect(0, 0, canvas.width, canvas.height);
+                        drawSource(src1, clip1, 1.0 - p * 2);
+                    } else {
+                        ctx.fillStyle = '#090a0f';
+                        ctx.fillRect(0, 0, canvas.width, canvas.height);
+                        drawSource(src2, clip2, (p - 0.5) * 2);
+                    }
+                } else if (type === 'wipe-left') {
+                    drawSource(src1, clip1, 1.0);
+                    drawSource(src2, clip2, 1.0, { x: 0, y: 0, w: canvas.width * p, h: canvas.height });
+                } else if (type === 'wipe-right') {
+                    drawSource(src1, clip1, 1.0);
+                    drawSource(src2, clip2, 1.0, { x: canvas.width * (1 - p), y: 0, w: canvas.width * p, h: canvas.height });
+                } else {
+                    drawSource(src1, clip1, 1.0);
+                    drawSource(src2, clip2, p);
+                }
+            } else {
+                drawSource(src1, clip1, 1.0);
+                if (src2 && clip2) {
+                    drawSource(src2, clip2, 1.0);
+                }
             }
 
             editor.updateGpuTelemetry({
                 isHardwareAccelerated: true,
-                isDualTexturePass: !!(src2 && transition && transition.progress > 0),
+                isDualTexturePass: !!(src2 && ((transition && transition.progress > 0) || !transition)),
                 activeTransition: (transition && transition.progress > 0) ? transition.type : null,
                 pipelineStatus: 'webgpu_active'
             });

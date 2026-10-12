@@ -77,8 +77,7 @@ export class MasterAudioClock {
    */
   public getVideoPresentationTime(timelineTime?: number): number {
     const t = timelineTime !== undefined ? timelineTime : this.getCurrentTime();
-    const { totalLatency } = this.getLatency();
-    return Math.max(0, t - totalLatency);
+    return Math.max(0, t);
   }
 
   /**

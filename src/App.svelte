@@ -342,6 +342,64 @@
   let lastVideoSeekTime = -1;
   let lastRenderedTimelinePTS = -1;
   let pendingSeek: { pts: number; isPlaying: boolean } | null = null;
+  let lastVideoLookaheadTime = 0;
+
+  const getAssetFile = async (asset: any): Promise<File | null> => {
+    if (!asset) return null;
+    let f = editor.getCachedFile(asset.name) || timelineFileCache.get(asset.name) || null;
+    if (!f && asset.fileHandle) {
+      try {
+        f = await asset.fileHandle.getFile();
+        if (f) {
+          timelineFileCache.set(asset.name, f);
+          editor.setCachedFile(asset.name, f);
+        }
+      } catch (_) {}
+    }
+    if (!f) {
+      f = (await getFileFromOPFS(asset.name)) || null;
+      if (f) {
+        timelineFileCache.set(asset.name, f);
+        editor.setCachedFile(asset.name, f);
+      }
+    }
+    if (!f && asset.blobUrl) {
+      try {
+        const res = await fetch(asset.blobUrl);
+        const blob = await res.blob();
+        f = new File([blob], asset.name, { type: 'video/mp4' });
+        timelineFileCache.set(asset.name, f);
+        editor.setCachedFile(asset.name, f);
+      } catch (_) {}
+    }
+    return f;
+  };
+
+  async function checkVideoLookahead(masterTime: number) {
+    if (Math.abs(masterTime - lastVideoLookaheadTime) < 0.25) return;
+    lastVideoLookaheadTime = masterTime;
+
+    const lookaheadHorizon = masterTime + 2.0;
+    for (const track of editor.tracks) {
+      if (track.isMuted) continue;
+      const isTrackAudio = track.type === 'audio' || track.name.startsWith('A');
+      if (isTrackAudio) continue;
+
+      for (const clip of track.clips) {
+        const isVideo = clip.type === 'video' || clip.type === 'image' || (!clip.type && !isTrackAudio);
+        if (!isVideo) continue;
+
+        if (clip.startAt > masterTime && clip.startAt <= lookaheadHorizon) {
+          const asset = editor.assets.find(a => a.id === clip.assetId) || editor.assets.find(a => a.name === clip.name);
+          if (asset) {
+            getAssetFile(asset).then(f => {
+              if (f) engine.preloadClip(f);
+            }).catch(() => {});
+          }
+        }
+      }
+    }
+  }
 
   async function seekAndRenderVideoFrame(videoPTS: number, isPlaying: boolean) {
     if (isSeekingVideo) {
@@ -364,26 +422,56 @@
       }
     }
 
+    let clipA: TimelineClip | null = null;
+    let clipB: TimelineClip | null = null;
+    let transition: { type: string; progress: number } | null = null;
+
     if (activeClips.length === 1) {
       const clip = activeClips[0];
       const track = editor.tracks.find(t => t.id === clip.trackId);
       if (track) {
         if (clip.transitionOut && videoPTS > clip.startAt + clip.duration - clip.transitionOut.duration) {
-          const nextClip = track.clips.find(c => c.startAt === clip.startAt + clip.duration);
-          if (nextClip) activeClips.unshift(nextClip);
+          const nextClip = track.clips.find(c => Math.abs(c.startAt - (clip.startAt + clip.duration)) < 0.05);
+          if (nextClip) {
+            clipA = clip;
+            clipB = nextClip;
+            const p = (videoPTS - (clip.startAt + clip.duration - clip.transitionOut.duration)) / clip.transitionOut.duration;
+            transition = { type: clip.transitionOut.type, progress: Math.max(0, Math.min(1, p)) };
+          } else {
+            clipA = clip;
+          }
         } else if (clip.transitionIn && videoPTS < clip.startAt + clip.transitionIn.duration) {
-          const prevClip = track.clips.find(c => c.startAt + c.duration === clip.startAt);
-          if (prevClip) activeClips.push(prevClip);
+          const prevClip = track.clips.find(c => Math.abs(c.startAt + c.duration - clip.startAt) < 0.05);
+          if (prevClip) {
+            clipA = prevClip;
+            clipB = clip;
+            const p = (videoPTS - clip.startAt) / clip.transitionIn.duration;
+            transition = { type: clip.transitionIn.type, progress: Math.max(0, Math.min(1, p)) };
+          } else {
+            clipA = clip;
+          }
+        } else {
+          clipA = clip;
         }
+      } else {
+        clipA = clip;
       }
+    } else if (activeClips.length > 1) {
+      clipA = activeClips[0];
+      clipB = activeClips[1];
     }
 
-    activeClips = activeClips.reverse();
-    const topClip = activeClips[0];
-    const bottomClip = activeClips[1];
+    // Frame Holding: Only clear canvas if playhead is truly in an empty region far from any clip
+    if (!clipA) {
+      const hasNearbyVideoClip = editor.tracks.some(t => 
+        !t.isMuted && (t.type !== 'audio' && !t.name.startsWith('A')) &&
+        t.clips.some(c => 
+          (c.type === 'video' || c.type === 'image' || (!c.type && t.type !== 'audio')) &&
+          videoPTS >= c.startAt - 0.08 && videoPTS <= c.startAt + c.duration + 0.08
+        )
+      );
 
-    if (!topClip) {
-      if (canvasRef) {
+      if (!hasNearbyVideoClip && canvasRef) {
         lastVideoSeekTime = -1;
         lastRenderedTimelinePTS = -1;
         const ctx = canvasRef.getContext('2d');
@@ -395,85 +483,45 @@
       return;
     }
 
-    if (topClip) {
-      const relTime1 = videoPTS - topClip.startAt;
-      const normT1 = Math.max(0, Math.min(1, topClip.duration > 0 ? relTime1 / topClip.duration : 0));
-      const speed1 = topClip.speedCurve ? evaluateSpeedCurve(topClip.speedCurve, normT1) : (topClip.speed ?? 1.0);
-      const targetTime1 = (topClip.sourceOffset || 0) + relTime1 * speed1;
+    if (clipA) {
+      const relTime1 = videoPTS - clipA.startAt;
+      const normT1 = Math.max(0, Math.min(1, clipA.duration > 0 ? relTime1 / clipA.duration : 0));
+      const speed1 = clipA.speedCurve ? evaluateSpeedCurve(clipA.speedCurve, normT1) : (clipA.speed ?? 1.0);
+      const targetTime1 = (clipA.sourceOffset || 0) + relTime1 * speed1;
 
       let targetTime2 = 0;
-      let transition: { type: string; progress: number } | null = null;
-
-      if (bottomClip) {
-        const relTime2 = videoPTS - bottomClip.startAt;
-        const normT2 = Math.max(0, Math.min(1, bottomClip.duration > 0 ? relTime2 / bottomClip.duration : 0));
-        const speed2 = bottomClip.speedCurve ? evaluateSpeedCurve(bottomClip.speedCurve, normT2) : (bottomClip.speed ?? 1.0);
-        targetTime2 = (bottomClip.sourceOffset || 0) + relTime2 * speed2;
-        if (topClip.transitionIn && videoPTS < topClip.startAt + topClip.transitionIn.duration) {
-          const p = (videoPTS - topClip.startAt) / topClip.transitionIn.duration;
-          transition = { type: topClip.transitionIn.type, progress: Math.max(0, Math.min(1, p)) };
-        } else if (bottomClip.transitionOut && videoPTS > bottomClip.startAt + bottomClip.duration - bottomClip.transitionOut.duration) {
-          const p = 1.0 - ((bottomClip.startAt + bottomClip.duration - videoPTS) / bottomClip.transitionOut.duration);
-          transition = { type: bottomClip.transitionOut.type, progress: Math.max(0, Math.min(1, p)) };
-        }
+      if (clipB) {
+        const relTime2 = videoPTS - clipB.startAt;
+        const normT2 = Math.max(0, Math.min(1, clipB.duration > 0 ? relTime2 / clipB.duration : 0));
+        const speed2 = clipB.speedCurve ? evaluateSpeedCurve(clipB.speedCurve, normT2) : (clipB.speed ?? 1.0);
+        targetTime2 = (clipB.sourceOffset || 0) + relTime2 * speed2;
       }
 
       if (editor.renderFrameDirty || Math.abs(targetTime1 - lastVideoSeekTime) >= (isPlaying ? 0.008 : 0.0005) || lastVideoSeekTime < 0) {
         editor.renderFrameDirty = false;
-        const asset1 = editor.assets.find(a => a.id === topClip.assetId) || editor.assets.find(a => a.name === topClip.name);
-        const asset2 = bottomClip ? (editor.assets.find(a => a.id === bottomClip.assetId) || editor.assets.find(a => a.name === bottomClip.name)) : null;
+        const asset1 = editor.assets.find(a => a.id === clipA.assetId) || editor.assets.find(a => a.name === clipA.name);
+        const asset2 = clipB ? (editor.assets.find(a => a.id === clipB.assetId) || editor.assets.find(a => a.name === clipB.name)) : null;
 
         if (asset1) {
           isSeekingVideo = true;
           try {
-            const getFile = async (asset: any) => {
-              if (!asset) return null;
-              let f = editor.getCachedFile(asset.name) || timelineFileCache.get(asset.name) || null;
-              if (!f && asset.fileHandle) {
-                try {
-                  f = await asset.fileHandle.getFile();
-                  if (f) {
-                    timelineFileCache.set(asset.name, f);
-                    editor.setCachedFile(asset.name, f);
-                  }
-                } catch (_) {}
-              }
-              if (!f) {
-                f = (await getFileFromOPFS(asset.name)) || null;
-                if (f) {
-                  timelineFileCache.set(asset.name, f);
-                  editor.setCachedFile(asset.name, f);
-                }
-              }
-              if (!f && asset.blobUrl) {
-                try {
-                  const res = await fetch(asset.blobUrl);
-                  const blob = await res.blob();
-                  f = new File([blob], asset.name, { type: 'video/mp4' });
-                  timelineFileCache.set(asset.name, f);
-                  editor.setCachedFile(asset.name, f);
-                } catch (_) {}
-              }
-              return f;
-            };
-
-            const [file1, file2] = await Promise.all([getFile(asset1), getFile(asset2)]);
+            const [file1, file2] = await Promise.all([getAssetFile(asset1), getAssetFile(asset2)]);
             if (file1) {
               lastVideoSeekTime = targetTime1;
               lastRenderedTimelinePTS = videoPTS;
               const clip1Info = { 
                 file: file1, 
                 time: targetTime1, 
-                grading: topClip.colorGrading,
-                cropRect: topClip.cropRect,
-                isBgRemoved: topClip.isBgRemoved
+                grading: clipA.colorGrading,
+                cropRect: clipA.cropRect,
+                isBgRemoved: clipA.isBgRemoved
               };
-              const clip2Info = (file2 && bottomClip) ? { 
+              const clip2Info = (file2 && clipB) ? { 
                 file: file2, 
                 time: targetTime2, 
-                grading: bottomClip.colorGrading,
-                cropRect: bottomClip.cropRect,
-                isBgRemoved: bottomClip.isBgRemoved
+                grading: clipB.colorGrading,
+                cropRect: clipB.cropRect,
+                isBgRemoved: clipB.isBgRemoved
               } : null;
               const seekMode = isPlaying ? ('adaptive' as const) : ('exact' as const);
               await engine.seekFrameWithTransition(clip1Info, clip2Info, transition, { mode: seekMode, isPlaying });
@@ -483,12 +531,16 @@
             }
           } finally {
             isSeekingVideo = false;
-            if (pendingSeek) {
+            // Only process pendingSeek when paused (e.g. scrubber settling).
+            // During playback, playLoop's RAF directly delivers the freshest videoPTS without recursive ping-pong.
+            if (pendingSeek && !isPlaying) {
               const next = pendingSeek;
               pendingSeek = null;
-              if (!next.isPlaying || Math.abs(next.pts - lastRenderedTimelinePTS) >= (next.isPlaying ? 0.008 : 0.0005)) {
-                seekAndRenderVideoFrame(next.pts, next.isPlaying);
+              if (Math.abs(next.pts - lastRenderedTimelinePTS) >= 0.0005) {
+                seekAndRenderVideoFrame(next.pts, false);
               }
+            } else {
+              pendingSeek = null;
             }
           }
         }
@@ -513,6 +565,9 @@
       
       // Periodically schedule upcoming audio clips within the lookahead window
       masterAudioClock.checkLookahead(masterTime, editor.tracks);
+
+      // Periodically preload upcoming video decoders within lookahead window
+      checkVideoLookahead(masterTime);
 
       // Hardware latency-compensated video presentation time (Master Audio Clock)
       const videoPTS = masterAudioClock.getVideoPresentationTime(editor.playhead);
