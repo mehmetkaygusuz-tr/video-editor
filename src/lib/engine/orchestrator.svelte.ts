@@ -226,7 +226,7 @@ export class EngineOrchestrator {
         );
     }
 
-    private async getNativeVideo(file: File, time: number): Promise<HTMLVideoElement | null> {
+    private async getNativeVideo(file: File, time: number, options?: SeekOptions): Promise<HTMLVideoElement | null> {
         if (typeof window === 'undefined') return null;
         try {
             let video = this.#videoElementCache.get(file.name);
@@ -281,16 +281,28 @@ export class EngineOrchestrator {
 
             const activeVideo = video;
             const clampedTime = Math.max(0, Math.min(activeVideo.duration || 1000, time));
-            if (Math.abs(activeVideo.currentTime - clampedTime) > 0.03) {
-                activeVideo.currentTime = clampedTime;
-                await new Promise<void>((resolve) => {
-                    const onSeeked = () => {
-                        activeVideo.removeEventListener('seeked', onSeeked);
-                        resolve();
-                    };
-                    activeVideo.addEventListener('seeked', onSeeked);
-                    setTimeout(onSeeked, 80);
-                });
+            if (options?.isPlaying) {
+                if (activeVideo.paused) {
+                    activeVideo.currentTime = clampedTime;
+                    activeVideo.play().catch(() => {});
+                } else if (Math.abs(activeVideo.currentTime - clampedTime) > 0.25) {
+                    activeVideo.currentTime = clampedTime;
+                }
+            } else {
+                if (!activeVideo.paused) {
+                    activeVideo.pause();
+                }
+                if (Math.abs(activeVideo.currentTime - clampedTime) > 0.02) {
+                    activeVideo.currentTime = clampedTime;
+                    await new Promise<void>((resolve) => {
+                        const onSeeked = () => {
+                            activeVideo.removeEventListener('seeked', onSeeked);
+                            resolve();
+                        };
+                        activeVideo.addEventListener('seeked', onSeeked);
+                        setTimeout(onSeeked, 60);
+                    });
+                }
             }
 
             if (activeVideo.videoWidth > 0) {
@@ -348,6 +360,11 @@ export class EngineOrchestrator {
         this.#decoderMap.forEach(d => {
             try { d.stopStreaming(); } catch (_) {}
         });
+        this.#videoElementCache.forEach(v => {
+            try {
+                if (!v.paused) v.pause();
+            } catch (_) {}
+        });
     }
 
     async seekFrameWithTransition(
@@ -356,7 +373,7 @@ export class EngineOrchestrator {
         transition: { type: string, progress: number } | null,
         options?: SeekOptions
     ) {
-        const getSource = async (info: { file: File, time: number, grading?: any }): Promise<{ type: 'frame', frame: VideoFrame } | { type: 'video', video: HTMLVideoElement } | null> => {
+        const getSource = async (info: { file: File, time: number, grading?: any }): Promise<{ type: 'frame', frame: VideoFrame, rotation: number } | { type: 'video', video: HTMLVideoElement, rotation: number } | null> => {
             let decoder = this.#decoderMap.get(info.file.name);
             if (!decoder) {
                 let loadPromise = this.#loadingPromises.get(info.file.name);
@@ -398,7 +415,7 @@ export class EngineOrchestrator {
                         : await decoder.seek(info.time, options);
                     if (res?.frame) {
                         editor.updateDecoderTelemetry(decoder.telemetry);
-                        return { type: 'frame', frame: res.frame };
+                        return { type: 'frame', frame: res.frame, rotation: res.rotation ?? decoder.rotation ?? 0 };
                     }
                     // If decoder is active, returning null means seek was superseded by a newer frame request.
                     // Do not fall back to native video element as that would fight with WebCodecs.
@@ -409,9 +426,9 @@ export class EngineOrchestrator {
             }
 
             // Universal fallback to native browser HTMLVideoElement
-            const nativeVideo = await this.getNativeVideo(info.file, info.time);
+            const nativeVideo = await this.getNativeVideo(info.file, info.time, options);
             if (nativeVideo) {
-                return { type: 'video', video: nativeVideo };
+                return { type: 'video', video: nativeVideo, rotation: 0 };
             }
             return null;
         };
@@ -431,15 +448,32 @@ export class EngineOrchestrator {
         const ctx = this.#ctx;
 
         try {
-            const srcW = src1.type === 'frame' ? src1.frame.displayWidth : src1.video.videoWidth;
-            const srcH = src1.type === 'frame' ? src1.frame.displayHeight : src1.video.videoHeight;
+            const getOrientedDimensions = (source: { type: 'frame', frame: VideoFrame, rotation: number } | { type: 'video', video: HTMLVideoElement, rotation: number }) => {
+                const rawW = source.type === 'frame' ? source.frame.displayWidth : source.video.videoWidth;
+                const rawH = source.type === 'frame' ? source.frame.displayHeight : source.video.videoHeight;
+                const rot = source.rotation || 0;
+                const isSwapped = rot === 90 || rot === 270;
+                return {
+                    orientedW: isSwapped ? rawH : rawW,
+                    orientedH: isSwapped ? rawW : rawH,
+                    rawW,
+                    rawH,
+                    rotation: rot
+                };
+            };
+
+            const initialDims = getOrientedDimensions(src1);
             if (canvas.width === 0 || canvas.height === 0) {
-                canvas.width = srcW || 1920;
-                canvas.height = srcH || 1080;
+                canvas.width = initialDims.orientedW || 1920;
+                canvas.height = initialDims.orientedH || 1080;
             }
 
+            // Clean background for aspect ratio letterbox/pillarbox
+            ctx.fillStyle = '#090a0f';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
             const drawSource = (
-                src: { type: 'frame', frame: VideoFrame } | { type: 'video', video: HTMLVideoElement },
+                src: { type: 'frame', frame: VideoFrame, rotation: number } | { type: 'video', video: HTMLVideoElement, rotation: number },
                 clip: { grading?: any, cropRect?: any, isBgRemoved?: boolean },
                 alpha: number = 1.0,
                 clipRect?: { x: number; y: number; w: number; h: number }
@@ -461,8 +495,38 @@ export class EngineOrchestrator {
                     ctx.filter = 'none';
                 }
 
-                const sW = src.type === 'frame' ? src.frame.displayWidth : src.video.videoWidth;
-                const sH = src.type === 'frame' ? src.frame.displayHeight : src.video.videoHeight;
+                const { orientedW, orientedH, rawW, rawH, rotation } = getOrientedDimensions(src);
+                const sW = orientedW || canvas.width;
+                const sH = orientedH || canvas.height;
+
+                // Aspect Ratio Preserving ('contain' fit - never squashed or stretched!)
+                const scale = Math.min(canvas.width / sW, canvas.height / sH);
+                const destW = sW * scale;
+                const destH = sH * scale;
+                const destX = (canvas.width - destW) / 2;
+                const destY = (canvas.height - destH) / 2;
+
+                const renderRawContent = (targetX: number, targetY: number, targetW: number, targetH: number) => {
+                    const crop = clip.cropRect;
+                    const sx = crop ? (crop.x ?? 0) * rawW : 0;
+                    const sy = crop ? (crop.y ?? 0) * rawH : 0;
+                    const sw = crop ? (crop.w ?? 1) * rawW : rawW;
+                    const sh = crop ? (crop.h ?? 1) * rawH : rawH;
+
+                    if (rotation !== 0 && src.type === 'frame') {
+                        ctx.save();
+                        ctx.translate(targetX + targetW / 2, targetY + targetH / 2);
+                        ctx.rotate((rotation * Math.PI) / 180);
+                        const isSwapped = rotation === 90 || rotation === 270;
+                        const drawW = isSwapped ? targetH : targetW;
+                        const drawH = isSwapped ? targetW : targetH;
+                        ctx.drawImage(src.frame, sx, sy, sw, sh, -drawW / 2, -drawH / 2, drawW, drawH);
+                        ctx.restore();
+                    } else {
+                        const mediaSource = src.type === 'frame' ? src.frame : src.video;
+                        ctx.drawImage(mediaSource, sx, sy, sw, sh, targetX, targetY, targetW, targetH);
+                    }
+                };
 
                 if (clip.isBgRemoved) {
                     const bgGrad = ctx.createRadialGradient(
@@ -479,28 +543,10 @@ export class EngineOrchestrator {
                     ctx.beginPath();
                     ctx.ellipse(canvas.width / 2, canvas.height * 0.55, canvas.width * 0.44, canvas.height * 0.46, 0, 0, Math.PI * 2);
                     ctx.clip();
-                    if (src.type === 'frame') {
-                        ctx.drawImage(src.frame, 0, 0, canvas.width, canvas.height);
-                    } else {
-                        ctx.drawImage(src.video, 0, 0, canvas.width, canvas.height);
-                    }
+                    renderRawContent(destX, destY, destW, destH);
                     ctx.restore();
-                } else if (clip.cropRect) {
-                    const sx = (clip.cropRect.x ?? 0) * sW;
-                    const sy = (clip.cropRect.y ?? 0) * sH;
-                    const sw = (clip.cropRect.w ?? 1) * sW;
-                    const sh = (clip.cropRect.h ?? 1) * sH;
-                    if (src.type === 'frame') {
-                        ctx.drawImage(src.frame, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-                    } else {
-                        ctx.drawImage(src.video, sx, sy, sw, sh, 0, 0, canvas.width, canvas.height);
-                    }
                 } else {
-                    if (src.type === 'frame') {
-                        ctx.drawImage(src.frame, 0, 0, canvas.width, canvas.height);
-                    } else {
-                        ctx.drawImage(src.video, 0, 0, canvas.width, canvas.height);
-                    }
+                    renderRawContent(destX, destY, destW, destH);
                 }
                 ctx.restore();
             };

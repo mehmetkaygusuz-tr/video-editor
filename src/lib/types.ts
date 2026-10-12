@@ -116,6 +116,9 @@ export interface Asset {
   fileHandle?: FileSystemFileHandle | null;
   color: string;
   blobUrl?: string;
+  width?: number;
+  height?: number;
+  rotation?: number;
 }
 
 export interface BeatMarker {
@@ -189,6 +192,7 @@ export interface DecodedFrameResult {
   isKeyframe: boolean;
   mode: 'fast_keyframe' | 'exact';
   decodeDurationMs: number;
+  rotation?: number;
 }
 
 export interface DecoderTelemetry {
@@ -230,6 +234,7 @@ export interface IDecoderEngine {
   readonly duration: number;
   readonly width: number;
   readonly height: number;
+  readonly rotation?: number;
   readonly codec: string | null;
 }
 

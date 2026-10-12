@@ -102,6 +102,9 @@
         const handle = await saveFileToOPFS(file, file.name);
         const blobUrl = URL.createObjectURL(file);
         let duration: number | undefined = undefined;
+        let assetWidth: number | undefined;
+        let assetHeight: number | undefined;
+
         if (type === 'video' || type === 'audio') {
           try {
             const mediaEl = document.createElement(type === 'video' ? 'video' : 'audio');
@@ -119,13 +122,30 @@
                 if (Number.isFinite(mediaEl.duration)) {
                   duration = mediaEl.duration;
                 }
+                if (type === 'video' && mediaEl instanceof HTMLVideoElement && mediaEl.videoWidth && mediaEl.videoHeight) {
+                  assetWidth = mediaEl.videoWidth;
+                  assetHeight = mediaEl.videoHeight;
+                }
                 cleanup();
               };
               mediaEl.onerror = () => cleanup();
             });
           } catch (_) {}
+        } else if (type === 'image') {
+          try {
+            const img = new Image();
+            img.src = blobUrl;
+            await new Promise((res) => {
+              img.onload = () => {
+                assetWidth = img.naturalWidth;
+                assetHeight = img.naturalHeight;
+                res(null);
+              };
+              img.onerror = () => res(null);
+            });
+          } catch (_) {}
         }
-        editor.addAsset(file.name, type, handle, duration, blobUrl);
+        editor.addAsset(file.name, type, handle, duration, blobUrl, assetWidth, assetHeight);
         editor.setCachedFile(file.name, file);
         editor.announce(`Medya yüklendi: ${file.name}`);
       } catch (err) {

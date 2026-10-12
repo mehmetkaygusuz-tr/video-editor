@@ -457,7 +457,16 @@ class VideoEditor {
     return this.#fileCache.get(name);
   }
 
-  addAsset(name: string, type: 'video' | 'audio' | 'image', fileHandle?: FileSystemFileHandle | null, duration?: number, blobUrl?: string) {
+  addAsset(
+    name: string, 
+    type: 'video' | 'audio' | 'image', 
+    fileHandle?: FileSystemFileHandle | null, 
+    duration?: number, 
+    blobUrl?: string,
+    width?: number,
+    height?: number,
+    rotation?: number
+  ) {
     const colors = {
       'video': '#2563eb',
       'audio': '#10b981',
@@ -470,8 +479,24 @@ class VideoEditor {
       duration,
       fileHandle,
       color: colors[type],
-      blobUrl
+      blobUrl,
+      width,
+      height,
+      rotation
     };
+
+    // Auto-detect vertical format for initial project media
+    if (width && height && (type === 'video' || type === 'image')) {
+      const isPortrait = (rotation === 90 || rotation === 270) ? (width > height) : (height > width);
+      if (this.tracks.every(t => t.clips.length === 0)) {
+        this.originalWidth = (rotation === 90 || rotation === 270) ? height : width;
+        this.originalHeight = (rotation === 90 || rotation === 270) ? width : height;
+        if (isPortrait) {
+          this.aspectRatio = '9:16';
+        }
+      }
+    }
+
     this.assets.push(asset);
     this.persistToIDB();
     return asset;

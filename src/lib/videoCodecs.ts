@@ -34,6 +34,7 @@ export class VideoDecoderWrapper implements IDecoderEngine {
   private _width = 0;
   private _height = 0;
   private _codec: string | null = null;
+  private _rotation = 0;
   
   // GOP & Keyframe metadata
   private _keyframeTimestamps: number[] = [];
@@ -46,11 +47,12 @@ export class VideoDecoderWrapper implements IDecoderEngine {
   private readonly MAX_RECENT_FRAMES = 12;
 
   // Forward-Streaming Lookahead Ring Buffer for 60fps stutter-free continuous playback
+  // Dynamic sizing: mobile devices use 16 frames to conserve VRAM, desktop uses 40
   private _streamBuffer: { pts: number; duration: number; frame: VideoFrame }[] = [];
   private _streamCancelToken: { cancelled: boolean } | null = null;
   private _streamActive = false;
   private _isStreamFilling = false;
-  private readonly MAX_RING_BUFFER = 60;
+  private readonly MAX_RING_BUFFER = (typeof navigator !== 'undefined' && (/Android|iPhone|iPad|iPod/i.test(navigator.userAgent) || (navigator.maxTouchPoints && navigator.maxTouchPoints > 2))) ? 16 : 40;
   
   // Telemetry
   private _lastPTS = 0;
@@ -73,6 +75,10 @@ export class VideoDecoderWrapper implements IDecoderEngine {
 
   get height(): number {
     return this._height;
+  }
+
+  get rotation(): number {
+    return this._rotation;
   }
 
   get codec(): string | null {
@@ -110,6 +116,12 @@ export class VideoDecoderWrapper implements IDecoderEngine {
     this._height = await this.videoTrack.getDisplayHeight();
     this._duration = await this.videoTrack.computeDuration();
     
+    try {
+      this._rotation = (await this.videoTrack.getRotation()) || 0;
+    } catch {
+      this._rotation = 0;
+    }
+
     try {
       this._codec = (await this.videoTrack.getCodec()) || 'unknown';
     } catch {
@@ -194,6 +206,10 @@ export class VideoDecoderWrapper implements IDecoderEngine {
   async seek(timeInSeconds: number, options?: SeekOptions): Promise<DecodedFrameResult | null> {
     if (!this._fileLoaded || !this.sink) return null;
 
+    if (this._streamActive) {
+      this.stopStreaming();
+    }
+
     if (this._isDecoding) {
       return new Promise<DecodedFrameResult | null>((resolve, reject) => {
         // Resolve prior pending seek as superseded (null)
@@ -254,7 +270,8 @@ export class VideoDecoderWrapper implements IDecoderEngine {
         pts: nearestKey,
         isKeyframe: true,
         mode: 'fast_keyframe',
-        decodeDurationMs: durationMs
+        decodeDurationMs: durationMs,
+        rotation: this._rotation
       };
     }
 
@@ -272,7 +289,8 @@ export class VideoDecoderWrapper implements IDecoderEngine {
             pts,
             isKeyframe: false,
             mode: 'exact',
-            decodeDurationMs: durationMs
+            decodeDurationMs: durationMs,
+            rotation: this._rotation
           };
         }
       }
@@ -360,7 +378,8 @@ export class VideoDecoderWrapper implements IDecoderEngine {
         pts: samplePTS,
         isKeyframe: isKey,
         mode: isFastKeyframeMode ? 'fast_keyframe' : 'exact',
-        decodeDurationMs: durationMs
+        decodeDurationMs: durationMs,
+        rotation: this._rotation
       };
     } catch (err) {
       console.warn('[VideoDecoderWrapper] mediabunny decode hatası:', err);
@@ -428,7 +447,8 @@ export class VideoDecoderWrapper implements IDecoderEngine {
           pts: candidate.pts,
           isKeyframe: false,
           mode: 'exact',
-          decodeDurationMs: durationMs
+          decodeDurationMs: durationMs,
+          rotation: this._rotation
         };
       }
     }
@@ -442,7 +462,8 @@ export class VideoDecoderWrapper implements IDecoderEngine {
         pts: this._lastPTS,
         isKeyframe: false,
         mode: 'exact',
-        decodeDurationMs: durationMs
+        decodeDurationMs: durationMs,
+        rotation: this._rotation
       };
     }
 
@@ -462,7 +483,8 @@ export class VideoDecoderWrapper implements IDecoderEngine {
         pts: this._lastPTS,
         isKeyframe: false,
         mode: 'exact',
-        decodeDurationMs: performance.now() - tStart
+        decodeDurationMs: performance.now() - tStart,
+        rotation: this._rotation
       };
     }
 
@@ -536,7 +558,7 @@ export class VideoDecoderWrapper implements IDecoderEngine {
   }
 
   getDimensions() {
-    return { width: this._width, height: this._height, duration: this._duration };
+    return { width: this._width, height: this._height, duration: this._duration, rotation: this._rotation };
   }
 
   dispose() {

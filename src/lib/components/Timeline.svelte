@@ -11,7 +11,7 @@
   import { 
     ZoomIn, ZoomOut, Sparkles, Volume2, VolumeX, Lock, LockOpen as Unlock,
     Magnet, Music, Scissors, Trash2, Plus, Shuffle, Gauge, Sliders, X,
-    Film, Type, FolderClosed, Wand2
+    Film, Type, FolderClosed, Wand2, ChevronLeft, ChevronRight
   } from '@lucide/svelte';
   
   const TRACK_HEIGHT = 56;
@@ -24,6 +24,27 @@
   let isPanning = false;
   let lastPanX = 0;
   let lastPanY = 0;
+  let touchStartX = $state<number | null>(null);
+  let touchStartY = $state<number | null>(null);
+  let touchStartTime = 0;
+
+  function nudgeTimeline(seconds: number) {
+    const newTime = Math.max(0, Math.min(editor.duration || 600, editor.playhead + seconds));
+    editor.playhead = newTime;
+    
+    // Auto-scroll timeline view to keep playhead comfortably visible
+    const targetPx = newTime * editor.zoom;
+    const viewWidth = containerWidth - effectiveHeaderWidth;
+    if (targetPx < editor.scrollX + 40) {
+      editor.scrollX = Math.max(0, targetPx - 60);
+    } else if (targetPx > editor.scrollX + viewWidth - 60) {
+      editor.scrollX = Math.max(0, targetPx - viewWidth + 80);
+    }
+
+    masterAudioClock.seek(newTime, editor.tracks);
+    editor.renderFrameDirty = true;
+    editor.triggerHaptic('light');
+  }
   
   let activePointers = new SvelteMap<number, PointerEvent>();
   let initialPinchDistance = 0;
@@ -274,6 +295,8 @@
     container.setPointerCapture(e.pointerId);
     activePointers.set(e.pointerId, e);
 
+    const isTouch = e.pointerType === 'touch';
+
     if (activePointers.size === 1) {
       const rect = container.getBoundingClientRect();
       const x = e.clientX - rect.left;
@@ -285,8 +308,17 @@
         isDraggingPlayhead = false;
         lastPanX = e.clientX;
         lastPanY = e.clientY;
+      } else if (isTouch) {
+        // Mobile touch on track/background: Pan/scroll timeline without unintentionally grabbing playhead
+        isPanning = true;
+        isDraggingPlayhead = false;
+        lastPanX = e.clientX;
+        lastPanY = e.clientY;
+        touchStartX = e.clientX;
+        touchStartY = e.clientY;
+        touchStartTime = Date.now();
       } else if (x > effectiveHeaderWidth) {
-        // Scrub playhead anywhere on timeline background, tracks or ruler
+        // Desktop mouse click: Scrub playhead anywhere on timeline background, tracks or ruler
         beginPlayheadScrub(e.clientX);
       }
     } else if (activePointers.size === 2) {
@@ -585,7 +617,18 @@
       if (isDraggingPlayhead) {
         masterAudioClock.seek(editor.playhead, editor.tracks);
         editor.renderFrameDirty = true;
+      } else if (isPanning && touchStartX !== null && touchStartY !== null) {
+        // Tap-to-seek on touch devices: if touched without drag movement (< 8px within 350ms)
+        const dist = Math.hypot(e.clientX - touchStartX, e.clientY - touchStartY);
+        const elapsed = Date.now() - touchStartTime;
+        if (dist < 8 && elapsed < 350) {
+          updatePlayhead(e.clientX);
+          masterAudioClock.seek(editor.playhead, editor.tracks);
+          editor.renderFrameDirty = true;
+        }
       }
+      touchStartX = null;
+      touchStartY = null;
       isDraggingPlayhead = false;
       editor.isScrubbing = false;
       isPanning = false;
@@ -1051,9 +1094,31 @@
       <!-- Adaptive NLE Ruler (Spatial Glass) -->
       <!-- svelte-ignore a11y_no_static_element_interactions -->
       <div 
-        class="absolute top-0 left-0 right-0 h-7 border-b border-white/10 spatial-glass-subtle z-20 select-none overflow-hidden cursor-pointer"
+        class="absolute top-0 left-0 right-0 h-7 border-b border-white/10 spatial-glass-subtle z-20 select-none overflow-hidden cursor-pointer flex items-center"
         onpointerdown={handleRulerPointerDown}
       >
+        <!-- Nudge Left Arrow Button (<) -->
+        <button
+          type="button"
+          onpointerdown={(e) => { e.stopPropagation(); nudgeTimeline(-2); }}
+          class="absolute left-1 top-1 z-30 h-5 w-5 rounded-md flex items-center justify-center bg-black/70 hover:bg-white/20 active:scale-90 text-neutral-300 hover:text-white border border-white/15 transition-all cursor-pointer shadow-md pointer-events-auto"
+          title="2 Saniye Geri Sar (-2s)"
+          aria-label="2 Saniye Geri Sar"
+        >
+          <ChevronLeft size={13} />
+        </button>
+
+        <!-- Nudge Right Arrow Button (>) -->
+        <button
+          type="button"
+          onpointerdown={(e) => { e.stopPropagation(); nudgeTimeline(2); }}
+          class="absolute right-1 top-1 z-30 h-5 w-5 rounded-md flex items-center justify-center bg-black/70 hover:bg-white/20 active:scale-90 text-neutral-300 hover:text-white border border-white/15 transition-all cursor-pointer shadow-md pointer-events-auto"
+          title="2 Saniye İleri Sar (+2s)"
+          aria-label="2 Saniye İleri Sar"
+        >
+          <ChevronRight size={13} />
+        </button>
+
         <div class="relative w-full h-full pointer-events-none" style="transform: translate3d(-{editor.scrollX}px, 0, 0)">
           {#each rulerTicks as tick (tick.left)}
             {#if tick.isMajor}

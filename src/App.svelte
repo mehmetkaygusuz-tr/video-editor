@@ -525,7 +525,7 @@
                 cropRect: clipB.cropRect,
                 isBgRemoved: clipB.isBgRemoved
               } : null;
-              const seekMode = isPlaying ? ('adaptive' as const) : ('exact' as const);
+              const seekMode = isPlaying ? ('adaptive' as const) : (editor.isScrubbing ? ('fast_keyframe' as const) : ('exact' as const));
               await engine.seekFrameWithTransition(clip1Info, clip2Info, transition, { mode: seekMode, isPlaying });
               if (isPlaying) {
                 masterAudioClock.recordVideoDrift(videoPTS);
@@ -666,6 +666,9 @@
         const handle = await saveFileToOPFS(file, file.name);
         const blobUrl = URL.createObjectURL(file);
         let duration: number | undefined = undefined;
+        let assetWidth: number | undefined;
+        let assetHeight: number | undefined;
+
         if (type === 'video' || type === 'audio') {
           try {
             const mediaEl = document.createElement(type === 'video' ? 'video' : 'audio');
@@ -683,13 +686,30 @@
                 if (Number.isFinite(mediaEl.duration)) {
                   duration = mediaEl.duration;
                 }
+                if (type === 'video' && mediaEl instanceof HTMLVideoElement && mediaEl.videoWidth && mediaEl.videoHeight) {
+                  assetWidth = mediaEl.videoWidth;
+                  assetHeight = mediaEl.videoHeight;
+                }
                 cleanup();
               };
               mediaEl.onerror = () => cleanup();
             });
           } catch (_) {}
+        } else if (type === 'image') {
+          try {
+            const img = new Image();
+            img.src = blobUrl;
+            await new Promise((res) => {
+              img.onload = () => {
+                assetWidth = img.naturalWidth;
+                assetHeight = img.naturalHeight;
+                res(null);
+              };
+              img.onerror = () => res(null);
+            });
+          } catch (_) {}
         }
-        editor.addAsset(file.name, type, handle, duration, blobUrl);
+        editor.addAsset(file.name, type, handle, duration, blobUrl, assetWidth, assetHeight);
         editor.announce(`Medya yüklendi: ${file.name}`);
       } catch (err) {
         console.error("Failed to import asset:", err);
@@ -914,7 +934,7 @@
           <!-- Ambient Top Cinema HUD Pill (Anchored within Monitor Stage so position never jumps on fullscreen) -->
           <div 
             class="absolute inset-x-0 flex items-center justify-between px-3 sm:px-5 z-20 pointer-events-none"
-            style="top: max(12px, env(safe-area-inset-top, 12px));"
+            style="top: {isFullscreen ? 'max(16px, env(safe-area-inset-top, 16px))' : '12px'};"
           >
             <!-- Aspect ratio selector: Mobile single-box dropdown + Desktop modern vector icon pill -->
             <!-- Desktop Bar (sm:flex) -->
