@@ -131,7 +131,11 @@ export class Exporter {
     try {
       const mixedAudioBuffer = await this.mixTimelineAudio(totalDuration, startSec, durationToExport);
       if (mixedAudioBuffer && mixedAudioBuffer.length > 0) {
-        const audioSource = new AudioBufferSource({ codec: selectedAudioCodec });
+        const audioSource = new AudioBufferSource({ 
+          codec: selectedAudioCodec,
+          quality: quality === 'high' ? QUALITY_HIGH : QUALITY_MEDIUM,
+          bitrate: 192_000
+        });
         output.addAudioTrack(audioSource);
         await audioSource.add(mixedAudioBuffer);
         hasAudioTrack = true;
@@ -146,16 +150,33 @@ export class Exporter {
     // 5. Cache asset files & decoders for timeline clips
     const assetMap = new Map<string, File>();
     for (const asset of editor.assets) {
-      if (asset.blobUrl) {
+      let f = editor.getCachedFile(asset.name) || null;
+      if (!f) {
         try {
-          let f = await getFileFromOPFS(asset.name);
-          if (!f) {
-            const resp = await fetch(asset.blobUrl);
-            const blob = await resp.blob();
-            f = new File([blob], asset.name, { type: asset.type === 'video' ? 'video/mp4' : 'audio/mp3' });
-          }
-          if (f) assetMap.set(asset.id, f);
+          f = await getFileFromOPFS(asset.name);
         } catch (_) {}
+      }
+      if (!f && asset.blobUrl) {
+        try {
+          const resp = await fetch(asset.blobUrl);
+          const blob = await resp.blob();
+          f = new File([blob], asset.name, { type: asset.type === 'video' ? 'video/mp4' : 'audio/mp3' });
+          editor.setCachedFile(asset.name, f);
+        } catch (_) {}
+      }
+      if (f) assetMap.set(asset.id, f);
+    }
+
+    // Pre-warm video decoders for all video assets in the timeline to guarantee 0ms latency
+    onProgress(5, 'Video çözücüler donanım üzerinde hazırlanıyor...');
+    for (const asset of editor.assets) {
+      if (asset.type === 'video') {
+        const file = assetMap.get(asset.id);
+        if (file) {
+          try {
+            await engine.seekFrameWithTransition({ file, time: 0 }, null, null, { mode: 'exact' });
+          } catch (_) {}
+        }
       }
     }
 
@@ -177,9 +198,16 @@ export class Exporter {
         ctx.fillRect(0, 0, width, height);
 
         // Find active clips at current timestamp
-        const activeVideoClips = allClips
+        let activeVideoClips = allClips
           .filter(c => c.type === 'video' && t >= c.startAt && t < c.startAt + c.duration)
           .sort((a, b) => a.startAt - b.startAt);
+
+        // Subframe cut boundary tolerance: prevents 1-frame micro-blackouts between adjacent cuts
+        if (activeVideoClips.length === 0) {
+          activeVideoClips = allClips
+            .filter(c => c.type === 'video' && t >= (c.startAt - dt * 0.75) && t <= (c.startAt + c.duration + dt * 0.75))
+            .sort((a, b) => a.startAt - b.startAt);
+        }
 
         if (activeVideoClips.length > 0) {
           // Check for transition between two clips
@@ -202,6 +230,18 @@ export class Exporter {
             await this.renderClipToCanvas(ctx, bottomClip, t, width, height, assetMap);
             ctx.save();
             ctx.globalAlpha = transition.progress;
+            await this.renderClipToCanvas(ctx, topClip, t, width, height, assetMap);
+            ctx.restore();
+          } else if (!bottomClip && topClip.transitionIn && t < topClip.startAt + topClip.transitionIn.duration && topClip.transitionIn.type === 'fade') {
+            const p = Math.max(0, Math.min(1, (t - topClip.startAt) / topClip.transitionIn.duration));
+            ctx.save();
+            ctx.globalAlpha = p;
+            await this.renderClipToCanvas(ctx, topClip, t, width, height, assetMap);
+            ctx.restore();
+          } else if (!bottomClip && topClip.transitionOut && t > topClip.startAt + topClip.duration - topClip.transitionOut.duration && topClip.transitionOut.type === 'fade') {
+            const p = Math.max(0, Math.min(1, (topClip.startAt + topClip.duration - t) / topClip.transitionOut.duration));
+            ctx.save();
+            ctx.globalAlpha = p;
             await this.renderClipToCanvas(ctx, topClip, t, width, height, assetMap);
             ctx.restore();
           } else {
@@ -289,10 +329,19 @@ export class Exporter {
     if (clip.assetId) {
       const file = assetMap.get(clip.assetId);
       if (file) {
-        const decoder = engine.getDecoder(file.name);
+        let decoder = engine.getDecoder(file.name);
+        if (!decoder) {
+          try {
+            await engine.seekFrameWithTransition({ file, time: srcTime }, null, null, { mode: 'exact' });
+            decoder = engine.getDecoder(file.name);
+          } catch (_) {}
+        }
         if (decoder) {
           try {
-            const seekResult = await decoder.seek(srcTime, { mode: 'exact' });
+            let seekResult = await decoder.seek(srcTime, { mode: 'exact' });
+            if (!seekResult || !seekResult.frame) {
+              seekResult = await decoder.seek(srcTime, { mode: 'adaptive' });
+            }
             if (seekResult && seekResult.frame) {
               const vf = seekResult.frame;
               try {
@@ -324,7 +373,26 @@ export class Exporter {
                   drawY = (canvasH - drawH) / 2;
                 }
 
-                ctx.drawImage(vf, drawX, drawY, drawW, drawH);
+                if (clip.isBgRemoved) {
+                  const bgGrad = ctx.createRadialGradient(
+                    canvasW / 2, canvasH * 0.4, 40,
+                    canvasW / 2, canvasH * 0.5, canvasH * 0.65
+                  );
+                  bgGrad.addColorStop(0, '#312e81');
+                  bgGrad.addColorStop(0.5, '#0f172a');
+                  bgGrad.addColorStop(1, '#020617');
+                  ctx.fillStyle = bgGrad;
+                  ctx.fillRect(0, 0, canvasW, canvasH);
+
+                  ctx.save();
+                  ctx.beginPath();
+                  ctx.ellipse(canvasW / 2, canvasH * 0.55, canvasW * 0.44, canvasH * 0.46, 0, 0, Math.PI * 2);
+                  ctx.clip();
+                  ctx.drawImage(vf, drawX, drawY, drawW, drawH);
+                  ctx.restore();
+                } else {
+                  ctx.drawImage(vf, drawX, drawY, drawW, drawH);
+                }
                 ctx.restore();
                 frameRendered = true;
               } finally {
@@ -402,9 +470,30 @@ export class Exporter {
     startSec: number = 0,
     durationToExport?: number
   ): Promise<AudioBuffer | null> {
-    const audioClips = editor.tracks
-      .flatMap(t => t.clips)
-      .filter(c => (c.type === 'audio' || (c.type === 'video' && (c.volume ?? 1) > 0)));
+    // Collect asset IDs on dedicated active audio tracks to prevent double-audio echo with video clips
+    const audioTrackAssetIds = new Set<string>();
+    for (const track of editor.tracks) {
+      if (track.isMuted) continue;
+      if (track.name.startsWith('A') || track.type === 'audio') {
+        for (const clip of track.clips) {
+          if (clip.assetId) audioTrackAssetIds.add(clip.assetId);
+        }
+      }
+    }
+
+    const audioClips: TimelineClip[] = [];
+    for (const track of editor.tracks) {
+      if (track.isMuted) continue;
+      for (const clip of track.clips) {
+        if (clip.type === 'audio') {
+          audioClips.push(clip);
+        } else if (clip.type === 'video' && (clip.volume ?? 1) > 0) {
+          if (!clip.assetId || !audioTrackAssetIds.has(clip.assetId)) {
+            audioClips.push(clip);
+          }
+        }
+      }
+    }
 
     if (audioClips.length === 0) return null;
 

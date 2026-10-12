@@ -277,7 +277,7 @@ export class EngineOrchestrator {
 
     clearMediaCache() {
         this.#decoderMap.forEach(d => {
-            try { d.dispose(); } catch (_) {}
+            try { d.stopStreaming(); d.dispose(); } catch (_) {}
         });
         this.#decoderMap.clear();
         this.#videoElementCache.forEach(v => {
@@ -293,7 +293,7 @@ export class EngineOrchestrator {
     removeAsset(fileName: string) {
         const dec = this.#decoderMap.get(fileName);
         if (dec) {
-            try { dec.dispose(); } catch (_) {}
+            try { dec.stopStreaming(); dec.dispose(); } catch (_) {}
             this.#decoderMap.delete(fileName);
         }
         const vid = this.#videoElementCache.get(fileName);
@@ -305,6 +305,12 @@ export class EngineOrchestrator {
             } catch (_) {}
             this.#videoElementCache.delete(fileName);
         }
+    }
+
+    stopPlaybackStreaming() {
+        this.#decoderMap.forEach(d => {
+            try { d.stopStreaming(); } catch (_) {}
+        });
     }
 
     async seekFrameWithTransition(
@@ -327,7 +333,7 @@ export class EngineOrchestrator {
                         const oldestKey = this.#decoderMap.keys().next().value;
                         if (oldestKey) {
                             const oldDecoder = this.#decoderMap.get(oldestKey);
-                            try { oldDecoder?.dispose(); } catch (_) {}
+                            try { oldDecoder?.stopStreaming(); oldDecoder?.dispose(); } catch (_) {}
                             this.#decoderMap.delete(oldestKey);
                         }
                     }
@@ -345,7 +351,9 @@ export class EngineOrchestrator {
             }
             if (decoder) {
                 try {
-                    const res = await decoder.seek(info.time, options);
+                    const res = options?.isPlaying
+                        ? await decoder.getPlaybackFrame(info.time)
+                        : await decoder.seek(info.time, options);
                     if (res?.frame) {
                         editor.updateDecoderTelemetry(decoder.telemetry);
                         return { type: 'frame', frame: res.frame };

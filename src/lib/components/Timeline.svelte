@@ -2,6 +2,7 @@
   import { untrack } from 'svelte';
   import { SvelteMap } from 'svelte/reactivity';
   import { editor } from '../editor.svelte';
+  import { appState } from '../appState.svelte';
   import { aiService } from '../engine/aiService.svelte';
   import { masterAudioClock } from '../engine/audioClock';
   import Waveform from './Waveform.svelte';
@@ -839,19 +840,30 @@
   }
 
   // Auto-scroll timeline to follow playhead during playback (keeps needle in comfortable viewport)
+  let lastAutoScrollTime = 0;
   $effect(() => {
     if (editor.isPlaying && !isDraggingPlayhead && !isPanning && activePointers.size === 0) {
-      const playheadPx = editor.playhead * editor.zoom;
+      const currentPlayhead = editor.playhead;
+      const currentZoom = editor.zoom;
+      const now = performance.now();
       untrack(() => {
+        if (now - lastAutoScrollTime < 100) return; // Prevent 60fps layout thrashing
+        const playheadPx = currentPlayhead * currentZoom;
         if (isMobileMode && containerWidth > 0) {
-          editor.scrollX = Math.max(0, playheadPx - (containerWidth / 2));
+          const targetScroll = Math.max(0, playheadPx - (containerWidth / 2));
+          if (Math.abs(targetScroll - editor.scrollX) > 4) {
+            editor.scrollX = targetScroll;
+            lastAutoScrollTime = now;
+          }
         } else if (containerWidth > 0) {
           const visibleLeft = editor.scrollX;
           const visibleRight = editor.scrollX + containerWidth - effectiveHeaderWidth;
-          if (playheadPx > visibleRight - 60) {
-            editor.scrollX = Math.max(0, playheadPx - 100);
+          if (playheadPx > visibleRight - 40) {
+            editor.scrollX = Math.max(0, playheadPx - 80);
+            lastAutoScrollTime = now;
           } else if (playheadPx < visibleLeft) {
-            editor.scrollX = Math.max(0, playheadPx - 50);
+            editor.scrollX = Math.max(0, playheadPx - 40);
+            lastAutoScrollTime = now;
           }
         }
       });
@@ -1104,8 +1116,8 @@
           </div>
         {/if}
 
-        <!-- Visual End of Video Cap -->
-        {#if editor.duration > 0}
+        <!-- Visual End of Video Cap (Only rendered when timeline contains actual media clips) -->
+        {#if editor.tracks.some(t => t.clips.length > 0) && editor.duration > 0}
           <div 
             class="absolute top-0 bottom-0 w-[2px] bg-rose-500/80 z-20 pointer-events-none shadow-[0_0_10px_rgba(244,63,94,0.6)]"
             style="transform: translate3d({editor.duration * editor.zoom}px, 0, 0);"
@@ -1157,26 +1169,17 @@
           <!-- svelte-ignore a11y_no_static_element_interactions -->
           <div 
             class="absolute top-0 bottom-0 pointer-events-auto cursor-ew-resize select-none touch-none flex flex-col items-center group/playhead"
-            style="left: {editor.playhead * editor.zoom}px; transform: translateX(-50%); width: 28px;"
+            style="left: 0; transform: translate3d({(editor.playhead * editor.zoom) - 14}px, 0, 0); width: 28px; outline: none !important; border: none !important; box-shadow: none !important;"
             onpointerdown={handlePlayheadPointerDown}
             role="slider"
-            tabindex="0"
+            tabindex="-1"
             aria-label="Oynatma Çizgisi"
             aria-valuenow={editor.playhead}
             aria-valuemin={0}
             aria-valuemax={editor.duration}
-            onkeydown={(e) => {
-              if (e.key === 'ArrowLeft') {
-                e.preventDefault();
-                editor.stepFrame(e.shiftKey ? -5 : -1);
-              } else if (e.key === 'ArrowRight') {
-                e.preventDefault();
-                editor.stepFrame(e.shiftKey ? 5 : 1);
-              }
-            }}
           >
             <!-- Ruby Diamond Head Marker in Ruler Area (Height 28px) -->
-            <div class="w-full h-7 flex flex-col items-center justify-center pointer-events-auto group-active/playhead:scale-110 transition-transform">
+            <div class="w-full h-7 flex flex-col items-center justify-center pointer-events-auto group-active/playhead:scale-110">
               <div class="w-5 h-4 bg-gradient-to-b from-rose-500 to-rose-600 rounded-t-md shadow-[0_0_12px_rgba(244,63,94,0.95)] flex items-center justify-center border border-white/50">
                 <div class="w-1 h-2 bg-white rounded-full shadow-sm"></div>
               </div>
@@ -1184,7 +1187,7 @@
             </div>
 
             <!-- Vertical Neon Laser Line across all tracks -->
-            <div class="w-[2px] flex-1 bg-gradient-to-b from-rose-500 via-purple-500 to-indigo-500 shadow-[0_0_12px_rgba(244,63,94,0.9)] pointer-events-none group-hover/playhead:w-[3px] group-hover/playhead:brightness-125 transition-all"></div>
+            <div class="w-[2px] flex-1 bg-gradient-to-b from-rose-500 via-purple-500 to-indigo-500 shadow-[0_0_12px_rgba(244,63,94,0.9)] pointer-events-none group-hover/playhead:w-[3px] group-hover/playhead:brightness-125"></div>
           </div>
         </div>
       </div>
@@ -1195,6 +1198,14 @@
   <!-- Radial Context Menu -->
   {#if radialMenuContext}
     {@const ctx = radialMenuContext}
+    <!-- Transparent backdrop to dismiss radial menu on outside click without triggering underlying tools -->
+    <!-- svelte-ignore a11y_no_static_element_interactions -->
+    <!-- svelte-ignore a11y_click_events_have_key_events -->
+    <div 
+      class="fixed inset-0 z-[99] bg-transparent cursor-default pointer-events-auto"
+      onclick={(e) => { e.stopPropagation(); radialMenuContext = null; }}
+      oncontextmenu={(e) => { e.preventDefault(); e.stopPropagation(); radialMenuContext = null; }}
+    ></div>
     <div 
       class="radial-menu-container fixed z-[100]"
       style="left: {ctx.x}px; top: {ctx.y}px;"
@@ -1242,7 +1253,15 @@
         <button 
           class="absolute w-10 h-10 rounded-full bg-neutral-800/95 border border-white/10 text-neutral-300 flex items-center justify-center pointer-events-auto shadow-xl hover:bg-neutral-700 hover:scale-110 active:scale-95 transition-all backdrop-blur-md"
           style="left: calc(50% - 20px - 68px); top: calc(50% - 20px);"
-          onclick={() => { editor.mobileWorkspace = 'filters'; radialMenuContext = null; }}
+          onclick={() => { 
+            if (window.innerWidth >= 1024) {
+              editor.activeSidebarTab = 'filters';
+              appState.isInspectorOpen = true;
+            } else {
+              editor.mobileWorkspace = 'filters';
+            }
+            radialMenuContext = null; 
+          }}
           title="Renk Filtreleri"
         >
           <Sliders size={18} />
@@ -1267,6 +1286,14 @@
     class="absolute top-1 bottom-1 rounded-xl shadow-lg border cursor-pointer select-none transition-all group/clip overflow-hidden backdrop-blur-md focus-visible:outline-none {editor.selectedClipId === clip.id ? 'ring-2 ring-purple-400 border-white shadow-[0_0_20px_rgba(168,85,247,0.45)] brightness-110 z-20' : 'border-white/10 hover:border-white/25 brightness-100'}"
     style="left: {clip.startAt * editor.zoom}px; width: {clip.duration * editor.zoom}px; background: {clip.type === 'audio' ? 'linear-gradient(135deg, rgba(6, 78, 59, 0.85) 0%, rgba(16, 185, 129, 0.5) 100%)' : clip.type === 'text' ? 'linear-gradient(135deg, rgba(120, 53, 15, 0.85) 0%, rgba(245, 158, 11, 0.5) 100%)' : 'linear-gradient(135deg, rgba(30, 58, 138, 0.85) 0%, rgba(37, 99, 235, 0.5) 100%)'};"
     onpointerdown={(e) => handleClipPointerDown(e, clip, 'move')}
+    ondblclick={(e) => {
+      e.stopPropagation();
+      e.preventDefault();
+      editor.selectClip(clip.id);
+      editor.seekTo(clip.startAt);
+      scheduleSettleSeek();
+      editor.renderFrameDirty = true;
+    }}
     oncontextmenu={(e) => handleClipContextMenu(e, clip)}
     onkeydown={(e) => {
       if (e.key === 'Enter' || e.key === ' ') {

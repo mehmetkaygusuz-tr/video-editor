@@ -103,7 +103,10 @@
         vTrack = editor.addTrack('V1', 'video');
       }
       const lastClipEnd = vTrack.clips.reduce((max, clip) => Math.max(max, clip.startAt + clip.duration), 0);
-      const startAt = Math.max(editor.playhead, lastClipEnd);
+      let startAt = lastClipEnd;
+      if (!editor.isMagnetic && editor.playhead > lastClipEnd + 0.5) {
+        startAt = editor.playhead;
+      }
 
       editor.addClip(
         vTrack.id,
@@ -139,7 +142,10 @@
       }
 
       const lastClipEnd = targetTrack.clips.reduce((max, clip) => Math.max(max, clip.startAt + clip.duration), 0);
-      const startAt = Math.max(editor.playhead, lastClipEnd);
+      let startAt = lastClipEnd;
+      if (!editor.isMagnetic && editor.playhead > lastClipEnd + 0.5) {
+        startAt = editor.playhead;
+      }
 
       editor.addClip(
         targetTrack.id,

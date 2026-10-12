@@ -94,6 +94,7 @@ export interface TimelineClip {
   subtitles?: SubtitleItem[];
   subtitleStyle?: Partial<SubtitleStyle>;
   isBgRemoved?: boolean;
+  bgRemovedMaskUrl?: string;
   colorGrading?: ColorGradingConfig;
   cropRect?: { x: number; y: number; w: number; h: number };
   reframeKeyframes?: { time: number; x: number; y: number; width: number; height: number }[];
@@ -178,6 +179,7 @@ export type ScrubbingMode = 'adaptive' | 'fast_keyframe' | 'exact';
 export interface SeekOptions {
   mode?: ScrubbingMode;
   priority?: 'high' | 'normal' | 'low';
+  isPlaying?: boolean;
 }
 
 export interface DecodedFrameResult {
@@ -218,6 +220,8 @@ export interface GpuTelemetry {
 export interface IDecoderEngine {
   load(file: File): Promise<void>;
   seek(timeInSeconds: number, options?: SeekOptions): Promise<DecodedFrameResult | null>;
+  getPlaybackFrame(timeInSeconds: number): Promise<DecodedFrameResult | null>;
+  stopStreaming(): void;
   getKeyframeTimestamps(): number[];
   getNearestKeyframe(timeInSeconds: number): number;
   dispose(): void;

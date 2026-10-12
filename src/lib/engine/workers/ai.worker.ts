@@ -378,6 +378,10 @@ self.onmessage = async (e: MessageEvent) => {
       const { image } = payload; // Can be a URL, data URL, or Blob URL
       
       try {
+        if (!image || image === 'dummy_frame') {
+          throw new Error('Geçerli bir görsel karesi sağlanamadı.');
+        }
+
         if (!segmenter) {
           notifyProgress(taskId, 'modnet_bg', 20, 'Segmentasyon modeli hazırlanıyor (briaai/RMBG-1.4)...');
           try {
@@ -405,8 +409,11 @@ self.onmessage = async (e: MessageEvent) => {
               loadedModelsList.add('briaai/RMBG-1.4 [WASM]');
               notifyLog('Segmentasyon modeli WASM modunda başarıyla yüklendi.', 'info');
             } catch (fallbackErr: any) {
-              notifyLog(`Segmentasyon modeli yüklenemedi: ${fallbackErr.message}`, 'error');
-              throw fallbackErr;
+              notifyLog(`briaai/RMBG-1.4 yüklenemedi (${fallbackErr.message}), onnx-community alternatifine geçiliyor...`, 'warn');
+              segmenter = await pipeline('image-segmentation', 'onnx-community/bria-rmbg-1.4', {
+                device: 'wasm'
+              });
+              loadedModelsList.add('onnx-community/bria-rmbg-1.4 [WASM]');
             }
           }
         }
@@ -419,17 +426,41 @@ self.onmessage = async (e: MessageEvent) => {
         // Run inference
         const result = await segmenter(rawImage);
         
-        // Assuming result provides a mask or segmented image
-        const maskImage = Array.isArray(result) ? result[0].mask : result.mask;
+        // Extract mask from result
+        const maskObj = Array.isArray(result) ? result[0]?.mask : (result?.mask ?? result);
         
         let processedImageBase64 = '';
-        
-        if (maskImage && typeof maskImage.toDataURL === 'function') {
-           processedImageBase64 = maskImage.toDataURL();
-        } else if (Array.isArray(result) && result[0] && typeof result[0].toDataURL === 'function') {
-           processedImageBase64 = result[0].toDataURL();
-        } else {
-           processedImageBase64 = typeof result === 'string' ? result : ''; 
+        if (maskObj && maskObj.data && rawImage.width > 0 && rawImage.height > 0) {
+          const w = rawImage.width;
+          const h = rawImage.height;
+          const rawRgba = rawImage.rgba();
+          const rgba = new Uint8ClampedArray(w * h * 4);
+          const maskData = maskObj.data;
+          
+          for (let i = 0; i < w * h; i++) {
+            rgba[i * 4] = rawRgba.data[i * 4];
+            rgba[i * 4 + 1] = rawRgba.data[i * 4 + 1];
+            rgba[i * 4 + 2] = rawRgba.data[i * 4 + 2];
+            rgba[i * 4 + 3] = maskData[i] !== undefined ? maskData[i] : 255;
+          }
+
+          if (typeof OffscreenCanvas !== 'undefined') {
+            const offscreen = new OffscreenCanvas(w, h);
+            const offCtx = offscreen.getContext('2d');
+            if (offCtx) {
+              const imgData = new ImageData(rgba, w, h);
+              offCtx.putImageData(imgData, 0, 0);
+              const blob = await offscreen.convertToBlob({ type: 'image/png' });
+              const buffer = await blob.arrayBuffer();
+              const bytes = new Uint8Array(buffer);
+              const CHUNK_SIZE = 0x8000;
+              let binary = '';
+              for (let i = 0; i < bytes.length; i += CHUNK_SIZE) {
+                binary += String.fromCharCode.apply(null, Array.from(bytes.subarray(i, i + CHUNK_SIZE)));
+              }
+              processedImageBase64 = `data:image/png;base64,${btoa(binary)}`;
+            }
+          }
         }
         
         notifyProgress(taskId, 'modnet_bg', 100, 'Arka plan ayrıştırma tamamlandı!');

@@ -1,4 +1,5 @@
 import type { AudioClockTelemetry, TimelineTrack, TimelineClip } from '../types';
+import { editor } from '../editor.svelte';
 import { Input, BlobSource, ALL_FORMATS, AudioBufferSink } from 'mediabunny';
 import { getFileFromOPFS } from '../opfs';
 import { evaluateSpeedCurve } from './speedCurve';
@@ -388,13 +389,36 @@ export class MasterAudioClock {
     const decodePromise = (async () => {
       try {
         let file: File | null = null;
-        if (clip.name) {
-          file = await getFileFromOPFS(clip.name);
+        let assetName = clip.name;
+        
+        if (clip.assetId) {
+          const asset = editor.assets.find(a => a.id === clip.assetId);
+          if (asset) {
+            assetName = asset.name;
+            file = editor.getCachedFile(asset.name) || null;
+            if (!file && asset.blobUrl) {
+              try {
+                const resp = await fetch(asset.blobUrl);
+                const blob = await resp.blob();
+                file = new File([blob], asset.name, { type: blob.type || 'video/mp4' });
+                editor.setCachedFile(asset.name, file);
+              } catch (_) {}
+            }
+          }
+        }
+        
+        if (!file && assetName) {
+          file = (await getFileFromOPFS(assetName)) || null;
+        }
+        if (!file && clip.name && clip.name !== assetName) {
+          file = (await getFileFromOPFS(clip.name)) || null;
         }
         if (!file && clip.sourceUrl) {
-          const resp = await fetch(clip.sourceUrl);
-          const blob = await resp.blob();
-          file = new File([blob], clip.name || 'audio_track', { type: blob.type });
+          try {
+            const resp = await fetch(clip.sourceUrl);
+            const blob = await resp.blob();
+            file = new File([blob], assetName || clip.name || 'audio_track', { type: blob.type });
+          } catch (_) {}
         }
         if (!file) return null;
 
@@ -403,20 +427,17 @@ export class MasterAudioClock {
         // 1. Try Mediabunny AudioBufferSink for demuxing from video/audio containers
         try {
           const input = new Input({
-            source: new BlobSource(file),
+            source: new BlobSource(file, { useStreamReader: false }),
             formats: ALL_FORMATS
           });
           try {
             const audioTrack = await input.getPrimaryAudioTrack();
             if (audioTrack) {
               const sink = new AudioBufferSink(audioTrack);
-              const startSec = clip.sourceOffset || 0;
-              const endSec = startSec + clip.duration + 1; // +1s buffer
               const wrappedBuffers: AudioBuffer[] = [];
-              
-              // Query buffer for the required clip range
+              // Decode the full audio track of the asset from 0 to end (0ms latency for all sub-clips)
               if (typeof (sink as any).buffers === 'function') {
-                for await (const wrapped of (sink as any).buffers(startSec, endSec)) {
+                for await (const wrapped of (sink as any).buffers(0, Infinity)) {
                   if (wrapped && wrapped.buffer) {
                     wrappedBuffers.push(wrapped.buffer);
                   } else if (wrapped instanceof AudioBuffer) {
@@ -424,7 +445,7 @@ export class MasterAudioClock {
                   }
                 }
               } else if (typeof sink.getBuffer === 'function') {
-                const buf = await sink.getBuffer(startSec);
+                const buf = await sink.getBuffer(0);
                 if (buf) wrappedBuffers.push(buf as any);
               }
 

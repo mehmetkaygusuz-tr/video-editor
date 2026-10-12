@@ -339,6 +339,7 @@
   const timelineFileCache = new Map<string, File>();
   let isSeekingVideo = false;
   let lastVideoSeekTime = -1;
+  let lastRenderedTimelinePTS = -1;
   let pendingSeek: { pts: number; isPlaying: boolean } | null = null;
 
   async function seekAndRenderVideoFrame(videoPTS: number, isPlaying: boolean) {
@@ -380,6 +381,7 @@
     if (!topClip) {
       if (canvasRef) {
         lastVideoSeekTime = -1;
+        lastRenderedTimelinePTS = -1;
         const ctx = canvasRef.getContext('2d');
         if (ctx) {
           ctx.fillStyle = '#090a0f';
@@ -408,7 +410,7 @@
         }
       }
 
-      if (editor.renderFrameDirty || Math.abs(targetTime1 - lastVideoSeekTime) >= (isPlaying ? 0.025 : 0.0005) || lastVideoSeekTime < 0) {
+      if (editor.renderFrameDirty || Math.abs(targetTime1 - lastVideoSeekTime) >= (isPlaying ? 0.008 : 0.0005) || lastVideoSeekTime < 0) {
         editor.renderFrameDirty = false;
         const asset1 = editor.assets.find(a => a.id === topClip.assetId) || editor.assets.find(a => a.name === topClip.name);
         const asset2 = bottomClip ? (editor.assets.find(a => a.id === bottomClip.assetId) || editor.assets.find(a => a.name === bottomClip.name)) : null;
@@ -450,6 +452,7 @@
             const [file1, file2] = await Promise.all([getFile(asset1), getFile(asset2)]);
             if (file1) {
               lastVideoSeekTime = targetTime1;
+              lastRenderedTimelinePTS = videoPTS;
               const clip1Info = { 
                 file: file1, 
                 time: targetTime1, 
@@ -464,8 +467,8 @@
                 cropRect: bottomClip.cropRect,
                 isBgRemoved: bottomClip.isBgRemoved
               } : null;
-              const seekMode = 'exact' as const;
-              await engine.seekFrameWithTransition(clip1Info, clip2Info, transition, { mode: seekMode });
+              const seekMode = isPlaying ? ('adaptive' as const) : ('exact' as const);
+              await engine.seekFrameWithTransition(clip1Info, clip2Info, transition, { mode: seekMode, isPlaying });
               if (isPlaying) {
                 masterAudioClock.recordVideoDrift(videoPTS);
               }
@@ -475,7 +478,9 @@
             if (pendingSeek) {
               const next = pendingSeek;
               pendingSeek = null;
-              seekAndRenderVideoFrame(next.pts, next.isPlaying);
+              if (!next.isPlaying || Math.abs(next.pts - lastRenderedTimelinePTS) >= (next.isPlaying ? 0.008 : 0.0005)) {
+                seekAndRenderVideoFrame(next.pts, next.isPlaying);
+              }
             }
           }
         }
@@ -533,6 +538,12 @@
       window.removeEventListener('pointerdown', unlockAudio);
       window.removeEventListener('touchstart', unlockAudio);
     };
+  });
+
+  $effect(() => {
+    if (!editor.isPlaying) {
+      engine.stopPlaybackStreaming();
+    }
   });
 
   $effect(() => {
@@ -1117,7 +1128,13 @@
       {#if appState.isInspectorOpen}
         <div class="hidden lg:flex w-[350px] flex-col flex-none spatial-glass lg:rounded-2xl overflow-hidden shadow-2xl border border-white/10">
           {#if editor.activeSidebarTab === 'filters'}
-            <FiltersSheet isBottomDocked={false} />
+            <FiltersSheet 
+              isBottomDocked={false} 
+              onClose={() => { 
+                editor.activeSidebarTab = 'media'; 
+                appState.isInspectorOpen = false; 
+              }} 
+            />
           {:else}
             <StudioSidebar isMobileSheet={false} hideTabs={true} />
           {/if}

@@ -129,6 +129,12 @@
 
   function handleClose() {
     editor.mobileWorkspace = 'timeline';
+    if (editor.activeSidebarTab === 'filters') {
+      editor.activeSidebarTab = 'media';
+    }
+    if (editor.activeBottomSheet === 'filters') {
+      editor.activeBottomSheet = null;
+    }
     if (onClose) onClose();
   }
 </script>
@@ -187,13 +193,11 @@
 
       <button
         onclick={handleClose}
-        class="p-1.5 rounded-xl bg-neutral-800/80 hover:bg-neutral-800 text-neutral-400 hover:text-white transition-colors cursor-pointer flex items-center gap-1"
-        title="Filtreleri Kapat (Zaman Çizelgesine Dön)"
+        class="px-2.5 py-1 rounded-xl bg-white/10 hover:bg-white/20 text-neutral-200 hover:text-white transition-colors cursor-pointer flex items-center gap-1.5 font-medium text-xs shadow-sm"
+        title="Filtreleri Kapat (Panele Dön)"
       >
         <X size={14} />
-        {#if isBottomDocked}
-          <span class="text-[10px] hidden xs:inline font-semibold">Kapat</span>
-        {/if}
+        <span>Kapat</span>
       </button>
     </div>
   </div>

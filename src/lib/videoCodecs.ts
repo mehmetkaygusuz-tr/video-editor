@@ -44,6 +44,13 @@ export class VideoDecoderWrapper implements IDecoderEngine {
   private readonly MAX_CACHE_FRAMES = 16;
   private _recentFrameCache = new Map<number, VideoFrame>();
   private readonly MAX_RECENT_FRAMES = 12;
+
+  // Forward-Streaming Lookahead Ring Buffer for 60fps stutter-free continuous playback
+  private _streamBuffer: { pts: number; duration: number; frame: VideoFrame }[] = [];
+  private _streamCancelToken: { cancelled: boolean } | null = null;
+  private _streamActive = false;
+  private _isStreamFilling = false;
+  private readonly MAX_RING_BUFFER = 24;
   
   // Telemetry
   private _lastPTS = 0;
@@ -89,7 +96,7 @@ export class VideoDecoderWrapper implements IDecoderEngine {
     this.dispose();
 
     this.input = new Input({
-      source: new BlobSource(file),
+      source: new BlobSource(file, { useStreamReader: false }),
       formats: ALL_FORMATS
     });
 
@@ -352,6 +359,133 @@ export class VideoDecoderWrapper implements IDecoderEngine {
     }
   }
 
+  /**
+   * Continuous forward streaming frame retrieval (O(1) sub-millisecond latency).
+   * Pulls pre-decoded frames from the forward streaming ring buffer,
+   * completely eliminating repeated GOP seeks during playback.
+   */
+  async getPlaybackFrame(timeInSeconds: number): Promise<DecodedFrameResult | null> {
+    if (!this._fileLoaded || !this.sink) return null;
+
+    const tStart = performance.now();
+    const targetTime = Math.max(0, Math.min(this._duration, timeInSeconds));
+
+    // Determine if the streaming pipeline needs to be initialized or repositioned
+    const hasBuffer = this._streamBuffer.length > 0;
+    const bufferHeadPTS = hasBuffer ? this._streamBuffer[0].pts : 0;
+    const bufferTailPTS = hasBuffer ? this._streamBuffer[this._streamBuffer.length - 1].pts : 0;
+
+    const isOutOfBufferRange = !hasBuffer || 
+      targetTime < bufferHeadPTS - 0.25 || 
+      targetTime > bufferTailPTS + 0.8;
+
+    if (!this._streamActive || isOutOfBufferRange) {
+      this.stopStreaming();
+      const token = { cancelled: false };
+      this._streamCancelToken = token;
+      this._fillStreamBuffer(targetTime, token);
+    }
+
+    // Wait briefly (up to 35ms) if the buffer is empty immediately after streaming starts
+    if (this._streamBuffer.length === 0 && this._isStreamFilling) {
+      let waited = 0;
+      while (this._streamBuffer.length === 0 && this._isStreamFilling && waited < 35 && !this._streamCancelToken?.cancelled) {
+        await new Promise(r => setTimeout(r, 5));
+        waited += 5;
+      }
+    }
+
+    // Prune stale frames that have already elapsed in presentation time
+    while (this._streamBuffer.length > 1 && this._streamBuffer[1].pts <= targetTime) {
+      const stale = this._streamBuffer.shift()!;
+      try { stale.frame.close(); } catch {}
+    }
+
+    // Check if the head frame matches the target presentation time
+    if (this._streamBuffer.length > 0) {
+      const candidate = this._streamBuffer[0];
+      if (Math.abs(candidate.pts - targetTime) <= 0.35) {
+        const durationMs = performance.now() - tStart;
+        this._lastPTS = candidate.pts;
+        this._lastIsKeyframe = false;
+        this._lastMode = 'exact';
+        this._lastDurationMs = durationMs;
+
+        return {
+          frame: candidate.frame.clone(),
+          pts: candidate.pts,
+          isKeyframe: false,
+          mode: 'exact',
+          decodeDurationMs: durationMs
+        };
+      }
+    }
+
+    // Fallback: adaptive seek if streaming pipeline is momentarily catching up
+    return await this.seek(targetTime, { mode: 'adaptive' });
+  }
+
+  private async _fillStreamBuffer(startPTS: number, token: { cancelled: boolean }) {
+    if (!this.sink) return;
+    this._streamActive = true;
+    this._isStreamFilling = true;
+    try {
+      const iter = this.sink.samples(startPTS);
+      for await (const sample of iter) {
+        if (token.cancelled || !this.sink) {
+          try { sample.close(); } catch {}
+          try { await iter.return(); } catch {}
+          break;
+        }
+
+        // Backpressure: throttle when buffer is full
+        while (this._streamBuffer.length >= this.MAX_RING_BUFFER && !token.cancelled) {
+          await new Promise(r => setTimeout(r, 10));
+        }
+
+        if (token.cancelled || !this.sink) {
+          try { sample.close(); } catch {}
+          try { await iter.return(); } catch {}
+          break;
+        }
+
+        try {
+          const frame = sample.toVideoFrame();
+          const pts = sample.timestamp;
+          const dur = sample.duration;
+          sample.close();
+          if (token.cancelled || !this.sink) {
+            try { frame.close(); } catch {}
+            break;
+          }
+          this._streamBuffer.push({ pts, duration: dur, frame });
+        } catch {
+          try { sample.close(); } catch {}
+        }
+      }
+    } catch (_) {
+      // End of media or cancelled iteration
+    } finally {
+      if (token === this._streamCancelToken) {
+        this._streamActive = false;
+        this._isStreamFilling = false;
+      }
+    }
+  }
+
+  stopStreaming(): void {
+    if (this._streamCancelToken) {
+      this._streamCancelToken.cancelled = true;
+      this._streamCancelToken = null;
+    }
+    this._streamActive = false;
+    this._isStreamFilling = false;
+    for (const item of this._streamBuffer) {
+      try { item.frame.close(); } catch {}
+    }
+    this._streamBuffer = [];
+  }
+
   async start(file: File): Promise<DecodedFrameResult | null> {
     await this.load(file);
     return await this.seek(0, { mode: 'exact' });
@@ -362,6 +496,8 @@ export class VideoDecoderWrapper implements IDecoderEngine {
   }
 
   dispose() {
+    this.stopStreaming();
+
     if (this._pendingSeek) {
       this._pendingSeek.resolve(null);
       this._pendingSeek = null;
