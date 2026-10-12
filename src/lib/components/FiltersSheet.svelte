@@ -53,6 +53,7 @@
           }
         }
       }
+      editor.renderFrameDirty = true;
       editor.saveState();
       editor.announce('Tüm kliplerin renk ayarları sıfırlandı.');
     } else {

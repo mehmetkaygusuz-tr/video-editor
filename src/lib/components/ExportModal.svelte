@@ -90,8 +90,15 @@
 
   function closeModal() {
     if (!isExporting) {
+      if (exportResult?.url) {
+        const oldUrl = exportResult.url;
+        setTimeout(() => {
+          try { URL.revokeObjectURL(oldUrl); } catch (_) {}
+        }, 15000);
+      }
       isOpen = false;
       errorMessage = null;
+      exportResult = null;
     }
   }
 </script>

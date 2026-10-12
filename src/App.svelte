@@ -3,7 +3,7 @@
   import { SvelteMap } from 'svelte/reactivity';
   import { editor } from './lib/editor.svelte';
   import type { TimelineClip } from './lib/types';
-  import { updateAudioEngine, ensureAudioUnlocked } from './lib/audio';
+  import { ensureAudioUnlocked } from './lib/audio';
   import { masterAudioClock } from './lib/engine/audioClock';
   import { getFileFromOPFS, saveFileToOPFS } from './lib/opfs';
   import { engine } from './lib/engine/orchestrator.svelte';
@@ -514,10 +514,10 @@
       editor.updateAudioClockTelemetry(masterAudioClock.getTelemetry());
       seekAndRenderVideoFrame(videoPTS, true);
     } else {
-      editor.updateAudioClockTelemetry(masterAudioClock.getTelemetry());
-      // Render frame when paused only when playhead changed or frame is dirty
+      // Render frame when paused only when playhead changed or frame is dirty (eliminates 60 FPS idle invalidations)
       if (editor.renderFrameDirty || Math.abs(editor.playhead - lastRenderedPlayhead) > 0.0005) {
         lastRenderedPlayhead = editor.playhead;
+        editor.updateAudioClockTelemetry(masterAudioClock.getTelemetry());
         seekAndRenderVideoFrame(editor.playhead, false);
       }
     }

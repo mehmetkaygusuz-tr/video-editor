@@ -142,6 +142,9 @@
   }
 
   function handleDeleteAsset(asset: any) {
+    if (asset.blobUrl) {
+      try { URL.revokeObjectURL(asset.blobUrl); } catch (_) {}
+    }
     engine.removeAsset(asset.name);
     editor.deleteAsset(asset.id);
   }

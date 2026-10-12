@@ -12,14 +12,19 @@
   let ducking = $state<boolean>(false);
   let pitchShift = $state<number>(0);
   let eqPreset = $state<'flat' | 'voice-boost' | 'bass-boost' | 'podcast'>('flat');
+  let lastSyncedClipId = $state<string | null>(null);
 
   $effect(() => {
-    if (selectedClip) {
-      fadeIn = selectedClip.audioEnvelope?.fadeIn ?? 0;
-      fadeOut = selectedClip.audioEnvelope?.fadeOut ?? 0;
-      ducking = selectedClip.audioEnvelope?.ducking ?? false;
-      pitchShift = selectedClip.audioEnvelope?.pitchShift ?? 0;
-      eqPreset = selectedClip.audioEnvelope?.eqPreset ?? 'flat';
+    const currentId = selectedClip?.id ?? null;
+    if (currentId !== lastSyncedClipId) {
+      lastSyncedClipId = currentId;
+      if (selectedClip) {
+        fadeIn = selectedClip.audioEnvelope?.fadeIn ?? 0;
+        fadeOut = selectedClip.audioEnvelope?.fadeOut ?? 0;
+        ducking = selectedClip.audioEnvelope?.ducking ?? false;
+        pitchShift = selectedClip.audioEnvelope?.pitchShift ?? 0;
+        eqPreset = selectedClip.audioEnvelope?.eqPreset ?? 'flat';
+      }
     }
   });
 

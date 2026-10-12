@@ -77,6 +77,7 @@
           } catch (_) {}
         }
         editor.addAsset(file.name, type, handle, duration, blobUrl);
+        editor.setCachedFile(file.name, file);
         editor.announce(`Medya yüklendi: ${file.name}`);
       } catch (err) {
         console.error("Failed to import asset:", err);
@@ -161,6 +162,9 @@
   }
 
   function handleDeleteAsset(asset: any) {
+    if (asset.blobUrl) {
+      try { URL.revokeObjectURL(asset.blobUrl); } catch (_) {}
+    }
     engine.removeAsset(asset.name);
     editor.deleteAsset(asset.id);
   }

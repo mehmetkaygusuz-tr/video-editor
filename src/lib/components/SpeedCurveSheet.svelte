@@ -22,13 +22,26 @@
   ]);
 
   let selectedPointIndex = $state<number>(0);
+  let lastSyncedClipId = $state<string | null>(null);
 
   $effect(() => {
-    if (selectedClip) {
-      activePreset = selectedClip.speedCurve?.preset || 'none';
-      keepPitch = selectedClip.speedCurve?.keepPitch ?? true;
-      if (selectedClip.speedCurve?.points && selectedClip.speedCurve.points.length > 0) {
-        points = structuredClone(selectedClip.speedCurve.points);
+    const currentId = selectedClip?.id ?? null;
+    if (currentId !== lastSyncedClipId) {
+      lastSyncedClipId = currentId;
+      if (selectedClip) {
+        activePreset = selectedClip.speedCurve?.preset || 'none';
+        keepPitch = selectedClip.speedCurve?.keepPitch ?? true;
+        if (selectedClip.speedCurve?.points && selectedClip.speedCurve.points.length > 0) {
+          points = structuredClone(selectedClip.speedCurve.points);
+        } else {
+          points = [
+            { time: 0.0, speed: 1.0 },
+            { time: 0.25, speed: 1.0 },
+            { time: 0.5, speed: 1.0 },
+            { time: 0.75, speed: 1.0 },
+            { time: 1.0, speed: 1.0 }
+          ];
+        }
       }
     }
   });

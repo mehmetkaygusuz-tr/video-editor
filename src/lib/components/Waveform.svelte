@@ -73,6 +73,13 @@
         if (!file) {
           file = await getFileFromOPFS(asset.name);
         }
+        if (!file && asset.blobUrl) {
+          try {
+            const resp = await fetch(asset.blobUrl);
+            const blob = await resp.blob();
+            file = new File([blob], asset.name, { type: asset.type === 'video' ? 'video/mp4' : 'audio/wav' });
+          } catch (_) {}
+        }
         if (file && !isCancelled) {
           totalDuration = asset.duration || 60;
           const p = await generateWaveformPeaks(file, 1000);

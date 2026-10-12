@@ -37,8 +37,9 @@ export async function generateWaveformPeaks(file: File, numPeaks: number = 1000)
     let channelData: Float32Array | null = null;
 
     // 1. First attempt: Streamlined audio extraction via Mediabunny (safe for 100MB+ videos)
+    let input: Input | null = null;
     try {
-      const input = new Input({
+      input = new Input({
         source: new BlobSource(file),
         formats: ALL_FORMATS
       });
@@ -64,7 +65,10 @@ export async function generateWaveformPeaks(file: File, numPeaks: number = 1000)
           channelData = merged;
         }
       }
-    } catch (_) {}
+    } catch (_) {
+    } finally {
+      try { (input as any)?.[Symbol.dispose]?.(); } catch (_) {}
+    }
 
     // 2. Fallback attempt: Direct AudioContext decode for audio files or standard containers
     if (!channelData || channelData.length === 0) {
@@ -103,17 +107,60 @@ export async function generateWaveformPeaks(file: File, numPeaks: number = 1000)
 export async function detectAudioBeats(file: File): Promise<{ bpm: number; beats: number[] }> {
   try {
     ensureAudioUnlocked();
-    const arrayBuffer = await file.arrayBuffer();
-    // Use an OfflineAudioContext with lower sample rate to analyze faster and save memory
-    const tempCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
-    let audioBuffer: AudioBuffer;
+    let data: Float32Array | null = null;
+    let sampleRate = 44100;
+
+    // 1. First attempt: Streamlined audio extraction via Mediabunny (safe for video container files)
+    let input: Input | null = null;
     try {
-      audioBuffer = await tempCtx.decodeAudioData(arrayBuffer.slice(0));
+      input = new Input({
+        source: new BlobSource(file),
+        formats: ALL_FORMATS
+      });
+      const audioTrack = await input.getPrimaryAudioTrack();
+      if (audioTrack) {
+        const sink = new AudioBufferSink(audioTrack);
+        const duration = (await input.computeDuration().catch(() => 60)) || 60;
+        const wrappedBuffers: AudioBuffer[] = [];
+        if (typeof (sink as any).buffers === 'function') {
+          for await (const wrapped of (sink as any).buffers(0, Math.min(180, duration))) {
+            if (wrapped && wrapped.buffer) wrappedBuffers.push(wrapped.buffer);
+            else if (wrapped instanceof AudioBuffer) wrappedBuffers.push(wrapped);
+          }
+        }
+        if (wrappedBuffers.length > 0) {
+          sampleRate = wrappedBuffers[0].sampleRate || 44100;
+          const totalLength = wrappedBuffers.reduce((sum, b) => sum + b.length, 0);
+          const merged = new Float32Array(totalLength);
+          let offset = 0;
+          for (const b of wrappedBuffers) {
+            merged.set(b.getChannelData(0), offset);
+            offset += b.length;
+          }
+          data = merged;
+        }
+      }
+    } catch (_) {
     } finally {
-      try { await tempCtx.close(); } catch (_) {}
+      try { (input as any)?.[Symbol.dispose]?.(); } catch (_) {}
     }
-    const data = audioBuffer.getChannelData(0);
-    const sampleRate = audioBuffer.sampleRate;
+
+    // 2. Fallback to direct AudioContext decode
+    if (!data || data.length === 0) {
+      const arrayBuffer = await file.arrayBuffer();
+      const tempCtx = new (window.AudioContext || (window as any).webkitAudioContext)();
+      try {
+        const audioBuffer = await tempCtx.decodeAudioData(arrayBuffer.slice(0));
+        data = audioBuffer.getChannelData(0);
+        sampleRate = audioBuffer.sampleRate;
+      } finally {
+        try { await tempCtx.close(); } catch (_) {}
+      }
+    }
+
+    if (!data || data.length === 0) {
+      return { bpm: 120, beats: [] };
+    }
     
     // Divide into 50ms windows to calculate spectral energy
     const windowSize = Math.floor(sampleRate * 0.05); // 50ms
@@ -174,22 +221,5 @@ export async function detectAudioBeats(file: File): Promise<{ bpm: number; beats
     console.warn("Beat detection failed:", e);
     return { bpm: 120, beats: [] };
   }
-}
-
-// Master Audio Clock Bridge for Preview Playback
-let lastPlaybackState = false;
-
-export function updateAudioEngine(playhead: number, isPlaying: boolean, tracks: any[]) {
-  if (isPlaying) {
-    // Only start audio once when playback state transitions from paused to playing
-    if (!lastPlaybackState) {
-      masterAudioClock.start(playhead, tracks);
-    }
-  } else {
-    if (lastPlaybackState) {
-      masterAudioClock.pause();
-    }
-  }
-  lastPlaybackState = isPlaying;
 }
 

@@ -150,11 +150,6 @@ export class EngineOrchestrator {
         }
     }
 
-    private fileNode: File | null = null;
-    private sabInitialized = false;
-    private seekDebounceTimer: number | null = null;
-    private lastSeekTime: number = -1;
-
     // Standart #11: Check hardware acceleration and latency capabilities
     async probeDeviceCapabilities() {
         if (!navigator.mediaCapabilities) return;
@@ -187,9 +182,6 @@ export class EngineOrchestrator {
         }
     }
 
-    private currentGrading: any = null;
-
-    
     getDecoder(fileName: string): VideoDecoderWrapper | undefined {
         return this.#decoderMap.get(fileName);
     }
@@ -216,8 +208,12 @@ export class EngineOrchestrator {
                         if (oldEl) {
                             try {
                                 oldEl.pause();
+                                const oldSrc = oldEl.src;
                                 oldEl.removeAttribute('src');
                                 oldEl.load();
+                                if (oldSrc && oldSrc.startsWith('blob:')) {
+                                    URL.revokeObjectURL(oldSrc);
+                                }
                             } catch (_) {}
                         }
                         this.#videoElementCache.delete(oldestKey);
@@ -283,8 +279,12 @@ export class EngineOrchestrator {
         this.#videoElementCache.forEach(v => {
             try {
                 v.pause();
+                const oldSrc = v.src;
                 v.removeAttribute('src');
                 v.load();
+                if (oldSrc && oldSrc.startsWith('blob:')) {
+                    URL.revokeObjectURL(oldSrc);
+                }
             } catch (_) {}
         });
         this.#videoElementCache.clear();
@@ -300,8 +300,12 @@ export class EngineOrchestrator {
         if (vid) {
             try {
                 vid.pause();
+                const oldSrc = vid.src;
                 vid.removeAttribute('src');
                 vid.load();
+                if (oldSrc && oldSrc.startsWith('blob:')) {
+                    URL.revokeObjectURL(oldSrc);
+                }
             } catch (_) {}
             this.#videoElementCache.delete(fileName);
         }

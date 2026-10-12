@@ -417,6 +417,7 @@ class VideoEditor {
       this.#historyIndex--;
       const snapshot = structuredClone(this.#history[this.#historyIndex]);
       this.tracks = snapshot;
+      this.renderFrameDirty = true;
       this.announce('İşlem geri alındı.');
       this.triggerHaptic('light');
       
@@ -433,6 +434,7 @@ class VideoEditor {
       this.#historyIndex++;
       const snapshot = structuredClone(this.#history[this.#historyIndex]);
       this.tracks = snapshot;
+      this.renderFrameDirty = true;
       this.announce('İşlem yinelendi.');
       this.triggerHaptic('light');
       
@@ -774,7 +776,7 @@ class VideoEditor {
         if (partial.volume !== undefined) {
           masterAudioClock.updateClipVolumeLive(clipId, partial.volume);
         }
-        if (partial.colorGrading !== undefined || partial.transitionIn !== undefined || partial.transitionOut !== undefined) {
+        if (partial.colorGrading !== undefined || partial.transitionIn !== undefined || partial.transitionOut !== undefined || partial.cropRect !== undefined || partial.isBgRemoved !== undefined) {
           this.renderFrameDirty = true;
         }
         if (save) this.saveState();
@@ -849,6 +851,7 @@ class VideoEditor {
     
     const deltaX = finalStartAt - targetClip.startAt;
     targetClip.startAt = finalStartAt;
+    this.renderFrameDirty = true;
 
     // Connected Clips: Move all anchored child clips in lockstep
     if (Math.abs(deltaX) > 0.0001) {
@@ -883,6 +886,7 @@ class VideoEditor {
 
         clip.duration = validDuration;
         clip.sourceOffset = validOffset;
+        this.renderFrameDirty = true;
         if (save) this.saveState();
         break;
       }
@@ -1071,6 +1075,7 @@ class VideoEditor {
       this.announce(`${type} geçişi uygulandı (${duration}s)`);
     }
 
+    this.renderFrameDirty = true;
     this.saveState();
     this.triggerHaptic('light');
   }
@@ -1089,6 +1094,7 @@ class VideoEditor {
       }
     }
 
+    this.renderFrameDirty = true;
     this.saveState();
     this.triggerHaptic('medium');
     this.announce(type === 'none' ? 'Tüm geçişler kaldırıldı' : `Tüm kesimlere ${type} uygulandı`);

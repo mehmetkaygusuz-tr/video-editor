@@ -22,12 +22,21 @@ self.onmessage = async (e: MessageEvent) => {
       
       decoder.dispose();
 
-      self.postMessage({
-        type: 'media_result',
-        taskId,
-        result: { imageBitmap },
-        payload: { taskId, result: { imageBitmap } }
-      });
+      if (imageBitmap) {
+        (self as any).postMessage({
+          type: 'media_result',
+          taskId,
+          result: { imageBitmap },
+          payload: { taskId, result: { imageBitmap } }
+        }, [imageBitmap]);
+      } else {
+        self.postMessage({
+          type: 'media_result',
+          taskId,
+          result: { imageBitmap: null },
+          payload: { taskId, result: { imageBitmap: null } }
+        });
+      }
     }
   } catch (error: any) {
     self.postMessage({

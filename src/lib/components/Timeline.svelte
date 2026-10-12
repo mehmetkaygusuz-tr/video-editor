@@ -54,7 +54,7 @@
     }
   });
 
-  // Adaptive NLE Ruler calculations (Prevents overlapping labels at any zoom level)
+  // Adaptive NLE Ruler calculations with viewport virtualization (Prevents DOM bloat and 60fps lag)
   const rulerTicks = $derived.by(() => {
     const minPixelSpacing = 75;
     const standardIntervals = [0.1, 0.25, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600];
@@ -73,10 +73,16 @@
     else if (interval === 60) subInterval = 10;
 
     const totalDuration = dynamicTimelineDuration;
-    const minorCount = Math.ceil(totalDuration / subInterval);
+    // Viewport-aware bounds (+ 150px buffer on each side for smooth scrolling)
+    const bufferSec = 150 / editor.zoom;
+    const renderStartSec = Math.max(0, viewportStart - bufferSec);
+    const renderEndSec = Math.min(totalDuration, viewportEnd + bufferSec);
+
+    const startIdx = Math.max(0, Math.floor(renderStartSec / subInterval));
+    const endIdx = Math.min(Math.ceil(totalDuration / subInterval), Math.ceil(renderEndSec / subInterval));
     const ticks: { time: number; label: string; left: number; isMajor: boolean }[] = [];
     
-    for (let j = 0; j <= minorCount; j++) {
+    for (let j = startIdx; j <= endIdx; j++) {
       const t = j * subInterval;
       if (t > totalDuration) break;
       const isMajor = Math.abs(t % interval) < 0.001 || Math.abs((t % interval) - interval) < 0.001;
@@ -399,7 +405,7 @@
          editor.beatMarkers.forEach(b => snapPoints.push({time: b.time, type: 'beat'}));
       }
 
-      activeSnapGuide = null; // reset by default
+      let activeGuide: { time: number; type: 'beat' | 'edge' } | null = null;
 
       if (activeClipDrag.mode === 'move') {
          let newStart = activeClipDrag.initialStartAt + timeDelta;
@@ -407,7 +413,6 @@
          // Snapping
          let bestSnapStart = newStart;
          let minSnapDist = snapThreshold;
-         let activeGuide = null;
 
          for (const p of snapPoints) {
              const distStart = Math.abs(newStart - p.time);
@@ -423,7 +428,6 @@
                  activeGuide = { time: p.time, type: p.type };
              }
          }
-         if (activeGuide) activeSnapGuide = activeGuide;
          newStart = bestSnapStart;
 
          // Clamp start so it doesn't overlap
@@ -447,7 +451,6 @@
          // Snapping
          let bestSnapStart = newStartTentative;
          let minSnapDist = snapThreshold;
-         let activeGuide = null;
          for (const p of snapPoints) {
              const dist = Math.abs(newStartTentative - p.time);
              if (dist < minSnapDist) {
@@ -456,7 +459,6 @@
                  activeGuide = { time: p.time, type: p.type };
              }
          }
-         if (activeGuide) activeSnapGuide = activeGuide;
          newStartTentative = bestSnapStart;
          finalDelta = newStartTentative - activeClipDrag.initialStartAt;
 
@@ -489,7 +491,6 @@
          // Snapping
          let bestSnapEnd = newEndTentative;
          let minSnapDist = snapThreshold;
-         let activeGuide = null;
          for (const p of snapPoints) {
              const dist = Math.abs(newEndTentative - p.time);
              if (dist < minSnapDist) {
@@ -498,7 +499,6 @@
                  activeGuide = { time: p.time, type: p.type };
              }
          }
-         if (activeGuide) activeSnapGuide = activeGuide;
          newDuration = bestSnapEnd - activeClipDrag.initialStartAt;
 
          // Collision clamp
@@ -530,6 +530,10 @@
             seekAssetId = clip.assetId;
             seekTime = clip.sourceOffset + newDuration;
          }
+      }
+
+      if (activeSnapGuide?.time !== activeGuide?.time || activeSnapGuide?.type !== activeGuide?.type) {
+         activeSnapGuide = activeGuide;
       }
       
       if (seekAssetId && seekTime >= 0) {
